@@ -1,0 +1,2271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>DGM — Demon Got Me (prototype)</title>
+<style>
+  /* Minimal page styling: dark page, centered canvas, no scrollbars */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    height: 100%;
+    overflow: hidden;
+    touch-action: none; /* prevents mobile scroll/zoom while tapping */
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    /* Size is set from JS (fitCanvas) to fill the window while keeping the 16:9 ratio */
+    display: block;
+    image-rendering: pixelated;
+    outline: none;
+  }
+</style>
+</head>
+<body>
+<!-- The canvas is the whole console (CANVAS_W x CANVAS_H, matching
+     frame_cabinet.png); the game renders inside its screen window -->
+<canvas id="game" width="1920" height="1080"></canvas>
+
+<!-- Supabase client library (online leaderboard). If this fails to load,
+     the game detects it and runs fully offline as before. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+"use strict";
+
+/* =====================================================================
+   TUNABLE CONSTANTS — everything you might want to tweak lives here.
+   All speeds are in pixels/second, all durations in seconds.
+   ===================================================================== */
+
+// --- Screen & cabinet ---
+// The canvas matches the console art (frame_cabinet.png, 1920x1080 = pure 16:9).
+// The console's screen is an OPAQUE black rectangle, so the game is drawn ON TOP
+// of the cabinet, clipped to that rectangle. Values below were measured from the
+// PNG (connected black component): x=397 y=121 w=1124 h=649, ratio 1.732.
+const CANVAS_W = 1920;             // full canvas width = cabinet image width (must match the <canvas> tag)
+const CANVAS_H = 1080;             // full canvas height = cabinet image height
+const SCREEN_X = 397;              // screen window left edge inside the cabinet art (px)
+const SCREEN_Y = 121;              // screen window top edge (px)
+const SCREEN_W = 1124;             // screen window width  — this is the game's playfield width
+const SCREEN_H = 649;              // screen window height — this is the game's playfield height
+const CANVAS_BG = "#0000EE";       // flat blue behind the cabinet (no background image)
+// The game sits BEHIND the console, not on top of it: the cabinet is painted
+// over the game with its screen opening punched out, so a few pixels of the
+// console's own bezel — and its rounded corners — overlap the picture. The
+// game is still rendered at full SCREEN_W x SCREEN_H; only its outer rim is
+// covered, which is what makes the screen read as part of the console body.
+const SCREEN_INSET = 10;           // px of console bezel left covering the game on each side
+const SCREEN_RADIUS = 20;          // corner radius of the opening — the art's corner is a
+                                   // stepped pixel curve roughly this wide (measured)
+const SCREEN_INNER_SHADOW = 18;    // soft shadow cast inside the opening (0 = off)
+const BOOT_LINE_T = 0.9;           // CRT "screen turns on" line effect duration (s)
+const BOOT_VERSION_T = 1.9;        // version screen duration right after the line effect (s)
+
+// --- Home screen decor ---
+// clouds_1/2, bg_prison all share the same 1060x618 canvas.
+// The two cloud tiles are opaque sky and seam perfectly in any order, so they
+// scroll as an endless 1,2,1,2... strip. The prison has a TRANSPARENT sky above
+// its wall, which is what lets the clouds show through behind it.
+const CLOUD_SCROLL_SPEED = 14;     // horizontal cloud drift on the home screen (px/s)
+const HOME_LOGO_H = 210;           // display height of logo.png (px)
+const HOME_LOGO_Y = 150;           // vertical center of the logo (px)
+const TITLE_SLIDE_DURATION = 0.6;  // how long the logo takes to slide in (s)
+const HOME_LOGO_BOUNCE_PX = 8;     // how far the logo bobs up and down once it has landed (px)
+const HOME_LOGO_BOUNCE_SPEED = 2.4; // logo bob speed (radians/s)
+const HOME_CAR_BLINK_FPS = 4;      // police light bar: car_1 <-> car_2 per second
+
+// --- Home characters (all sized by CHARACTER height, never by frame height,
+//     because idle_* and scared use a taller/narrower frame than the
+//     915x915 run squares). Their actual sizes are derived further down, from
+//     the gameplay values, so the home screen and the run share ONE scale. ---
+const HOME_GROUND_FRAC = 0.93;     // where the characters' feet sit (fraction of the decor height)
+const HOME_CHAR_FRAC = 0.30;       // idle character position (fraction of the screen width)
+const HOME_IDLE_FPS = 2.2;         // idle_1..4 loop speed (looking around, slow)
+const HOME_RUN_FPS = 12;           // run loop speed when the runner sprints off
+const HOME_KOALA_FPS = 8;          // koala walk loop speed
+
+// --- Home intro sequence (scripted, plays every time START is pressed) ---
+const HOME_SEQ_KOALA_IN = 1.5;     // koala drives/walks in from the right (s)
+const HOME_SEQ_KOALA_STOP = 0.7;   // koala stands still, menacing (s)
+const HOME_SEQ_SCARED = 0.6;       // the red character is scared, frozen (s)
+const HOME_SEQ_RUNOUT = 1.0;       // he sprints off to the right, then the game starts (s)
+const HOME_KOALA_START_FRAC = 1.15; // koala's entry x (fraction of screen width, off-screen right)
+const HOME_KOALA_STOP_FRAC = 0.46;  // where he stops: roughly FACING the red character, well
+                                    // clear of the parked car (fraction of screen width)
+const HOME_CAR_FRAC = 0.82;         // the police car is parked here the whole time
+const HOME_RUNOUT_SPEED = 620;     // red character sprint speed during the run-out (px/s)
+const HOME_WIPE_T = 0.35;          // black wipe sliding in before the game starts (s)
+
+// --- Death sequence ---
+// Two beats: the runner is thrown into his `hurt` pose and freezes there while a
+// koala sprints in from the LEFT to catch him; the moment he reaches him both
+// vanish and the gameover_player_1..7 animation plays out.
+const DEATH_SEQUENCE_DURATION = 3.4; // whole sequence, both beats (s)
+const DEATH_CATCH_FRAC = 0.38;       // when the koala reaches the player (fraction of the sequence)
+const DEATH_KOALA_FROM = -0.14;      // koala's start x (fraction of screen width, just off-screen
+                                     // LEFT, so he is on screen almost immediately)
+const GAMEOVER_FRAME_COUNT = 7;      // gameover_player_1..7, played once in order
+const GAMEOVER_BEAT_FRAME_T = 0.26;  // seconds per gameover frame (7 frames ~ 1.8s)
+
+/* ---------------------------------------------------------------------
+   GAMEPLAY CONSTANTS
+   All values below were scaled by SCREEN_H_RATIO = 649/548 = 1.184 when the
+   playfield grew from 1021x548 to 1124x649, so the game keeps exactly the same
+   proportions and difficulty as before — it is simply rendered bigger.
+   --------------------------------------------------------------------- */
+
+// --- Run speed & scoring ---
+const BASE_SPEED = 403;            // world scroll speed at the very start of a run (px/s)
+const SPEED_RAMP = 4.7;            // extra speed gained per second (px/s per s)
+const MAX_SPEED = 568;             // speed cap (px/s)
+const SCORE_PER_PIXEL = 0.038;     // score gained per pixel traveled (scaled down so the
+                                   // score still climbs at the same rate per SECOND)
+
+// --- Player physics ---
+const GRAVITY = 4086;              // downward acceleration (px/s²)
+const JUMP_VELOCITY = 1279;        // initial upward speed of a jump (px/s)
+const DOUBLE_JUMP_VELOCITY = 1208; // upward speed of the second (air) jump (px/s)
+const JUMP_CUT_MULT = 0.45;        // releasing early multiplies upward speed by this (tap = short hop)
+const HODL_FALL_SPEED = 195;       // max fall speed while the button is HELD ("HODL" glide, px/s)
+const MAX_FALL_SPEED = 1954;       // max fall speed in normal free fall (px/s)
+const COYOTE_TIME = 0.08;          // grace period to still jump right after leaving the ground (s)
+const JUMP_BUFFER_TIME = 0.10;     // pressing jump this early before landing still triggers it (s)
+
+// --- Player hitbox (NEVER changes during a run, only visuals change) ---
+const PLAYER_X = 272;              // fixed horizontal position of the player (~24% from the left)
+const PLAYER_W = 99;               // hitbox width (px) — sized to the sprite: head AND tail are inside
+const PLAYER_H = 109;              // hitbox height (px) — matches the drawn character height
+const HITBOX_PAD = 7;              // collision forgiveness: hitbox is shrunk by this on each side (px)
+
+// --- Player sprites ---
+// Every player_* frame shares ONE 915x915 square, with the artwork already
+// aligned inside it (feet flush to the bottom edge, y=31..915 = 96.6% of the
+// square). So we draw the WHOLE square, untrimmed, anchored bottom-center: the
+// frames then line up perfectly with zero per-frame bookkeeping.
+const ANIM_FPS = 10;               // speed of the run / hold animation loops (frames per second)
+const RUN_FRAME_COUNT = 4;         // number of player_run_* frames
+const HOLD_FRAME_COUNT = 3;        // number of player_hold_* frames
+const DEBUG_HITBOX = true;         // true = draw the real collision box over the sprite (alignment check)
+const PLAYER_SPRITE_H = 118;       // the 915x915 SQUARE is drawn at this height (px), so the
+                                   // character inside it stands 118 * 0.966 = 114px tall
+const PLAYER_ART_FILL = 0.966;     // fraction of the square actually covered by the character
+// player_hurt is the one exception: its artwork sits vertically CENTERED in
+// the square (y=150..765), because the character is thrown through the air —
+// so it is anchored on the hitbox CENTER instead of on the feet.
+
+// --- World layout ---
+const GROUND_Y = 545;              // vertical position of the ground line (px from top of the screen window)
+                                   // TODO: recalibrate once Benoit's ground art lands (his track sits lower)
+
+// --- Obstacle generation (time-based spacing => always playable at any speed) ---
+const SPAWN_GAP_MIN = 0.95;        // minimum time between two hazards (s)
+const SPAWN_GAP_MAX = 1.70;        // maximum time between two hazards (s)
+const KOALA_ANIM_FPS = 7;          // koala_running_1..2 walk loop (frames per second)
+const PIGEON_ANIM_FPS = 2.5;       // pigeon_1..2 wing beat — deliberately slow and lazy
+// Size presets per obstacle type. Only the HEIGHT is authoritative: the width
+// is derived from the artwork's aspect ratio, so nothing is ever stretched.
+const KOALA_SIZES = [
+  { w: 84, h: 97 },                // the koala cop, small
+  { w: 97, h: 128 }                // the koala cop, tall
+];
+const PIGEON_SIZES = [
+  { w: 105, h: 110 }               // a small bird — clearly smaller than the runner
+];
+
+// --- Pigeon flight ---
+// The bird never sits still: it either bobs up and down or glides down on a
+// diagonal. BOTH paths are bounded so its lowest point is exactly the overhead
+// clearance line, which keeps it possible to run underneath at all times.
+const PIGEON_WAVE_AMPLITUDE = 38;  // how far above the clearance line it rises (px)
+const PIGEON_WAVE_SPEED = 1.9;     // bobbing speed (radians/s)
+const PIGEON_DIAGONAL_CHANCE = 0.35; // share of pigeons gliding down diagonally instead of bobbing
+const PIGEON_DIAGONAL_RISE = 95;   // how high a diagonal one starts above the clearance line (px)
+// ONE SIZE EVERYWHERE: the home screen, the intro sequence and the death scene
+// all reuse the sizes the run itself uses. The old "he arrives bigger, bumps
+// into something and shrinks" gag is gone — the character never changes scale.
+const PLAYER_CHAR_H = PLAYER_SPRITE_H * PLAYER_ART_FILL; // 114px: the character inside the square
+const HOME_CHAR_H = PLAYER_CHAR_H;                       // same red character as in game
+const HOME_KOALA_H = KOALA_SIZES[1].h;                   // same koala as the tall ground obstacle
+const DEATH_KOALA_H = HOME_KOALA_H;                      // and the same one catching you at the end
+const HOME_CAR_H = Math.round(HOME_KOALA_H * 0.74);      // the police car, roof a bit below his ears
+
+const OVERHEAD_CLEARANCE = 45;     // free space between the player's head (running) and an overhead block (px)
+const GAP_WIDTH_MIN = 130;         // hole in the ground: min width (px) — must stay jumpable
+const GAP_WIDTH_MAX = 201;         // hole in the ground: max width (px)
+
+// --- Obstacle hitboxes ---
+// HITBOX_MODE lets us A/B the two approaches asked for in the spec:
+//   "body"  — a FIXED box on the creature's body, expressed as fractions of the
+//             sprite frame. Wings and tail feathers are deliberately outside it.
+//   "art"   — the box hugs the artwork's own opaque bounds, per frame.
+// "body" is the default and the recommended one: the two pigeon frames have very
+// different opaque bounds (frame 1: x=179 w=1831 h=1680, frame 2: x=0 w=2077
+// h=1646), so "art" makes the hitbox jump around as the wings flap — exactly the
+// offset we want gone. Both frames share a canvas, so a fixed box is rock steady.
+const HITBOX_MODE = "body";
+// Body box as fractions of the sprite frame {x0, y0, x1, y1}, measured on the
+// overlap of the animation frames (head + torso, wings excluded).
+// Keys are the obstacle's own `type` ("ground" / "overhead").
+const OBSTACLE_BODY_BOX = {
+  ground:   { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 }, // koala: fills its frame, barely trimmed
+  // Pigeon: the WHOLE bird, wings included. Its two frames sweep their wings
+  // across opposite corners (frame 1 reaches the top-right, frame 2 the
+  // bottom-left), so the union of the artwork IS the full frame — which makes
+  // the hitbox and the drawn sprite exactly the same rect here.
+  overhead: { x0: 0.00, y0: 0.00, x1: 1.00, y1: 1.00 }
+};
+
+// --- Collectibles (2 kinds: points, hodl) ---
+const COLLECT_VALUE = 20;          // score gained per POINTS collectible
+const COLLECT_RADIUS = 26;         // collectible half-height (px) — the pickup box hugs the artwork
+const COLLECT_SPAWN_MIN = 1.5;     // min time between collectibles (s)
+const COLLECT_SPAWN_MAX = 3.5;     // max time between collectibles (s)
+const COLLECT_WEIGHT_HODL = 0.30;  // chance a spawned collectible is a HODL token (the rest are points)
+
+// --- HODL meter (the glide is a resource, refilled by collectible_hodl) ---
+const HODL_METER_MAX = 3.0;        // max seconds of glide the meter can store
+const HODL_START = 1.5;            // glide seconds available at the start of a run
+const HODL_REFILL = 1.0;           // glide seconds given by one HODL token
+// Tip: set HODL_START and HODL_METER_MAX very high to get the old unlimited glide back
+
+// --- HUD placement (the cabinet art slightly overlaps the window edges) ---
+const HUD_INSET_X = 76;            // horizontal distance of the HUD from the screen edges (px)
+const HUD_INSET_Y = 50;            // vertical distance of the HUD from the top (px)
+
+// --- Juice / feedback ---
+const FLASH_DURATION = 0.12;       // duration of screen flashes (s)
+const SHAKE_DURATION = 0.35;       // duration of screen shake on death (s)
+const SHAKE_STRENGTH = 7;          // max shake offset (px)
+const RESTART_LOCK = 0.5;          // delay before the game-over screen accepts a restart input (s)
+const SOUND_VOLUME = 0.07;         // master volume of the little beeps (0 = mute)
+
+/* =====================================================================
+   SETUP
+   ===================================================================== */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+// W/H are the GAME's coordinates: every screen and all gameplay render inside
+// the console's screen window, whose size is SCREEN_W x SCREEN_H.
+const W = SCREEN_W;
+const H = SCREEN_H;
+
+// --- Responsive scaling: fill the window, keep the cabinet ratio, centered.
+// On a PORTRAIT screen (phone held upright) the whole game is rotated 90° so
+// it always plays in landscape, whatever the device orientation lock says.
+let canvasRotated = false; // true when the 90° portrait rotation is active
+function fitCanvas() {
+  canvasRotated = window.innerHeight > window.innerWidth;
+  // available space for the (possibly rotated) canvas
+  const availW = canvasRotated ? window.innerHeight : window.innerWidth;
+  const availH = canvasRotated ? window.innerWidth : window.innerHeight;
+  const scale = Math.min(availW / CANVAS_W, availH / CANVAS_H);
+  canvas.style.width = Math.floor(CANVAS_W * scale) + "px";
+  canvas.style.height = Math.floor(CANVAS_H * scale) + "px";
+  // absolutely centered; the rotation happens around that center
+  canvas.style.position = "absolute";
+  canvas.style.left = "50%";
+  canvas.style.top = "50%";
+  canvas.style.transform = canvasRotated
+    ? "translate(-50%, -50%) rotate(90deg)"
+    : "translate(-50%, -50%)";
+}
+window.addEventListener("resize", fitCanvas);
+window.addEventListener("orientationchange", fitCanvas);
+fitCanvas();
+
+/* ---------------------------------------------------------------------
+   IMAGE SLOT SYSTEM
+   Each visual element tries to load assets/<slot>.png. If the file is
+   missing, the game silently draws its colored-shape placeholder instead.
+   Drop a PNG into assets/ later and it replaces the shape automatically,
+   without touching the code.
+   --------------------------------------------------------------------- */
+const ASSET_SLOTS = [
+  // Cabinet
+  "frame_cabinet",
+  // Home decor (all three share a 1060x618 canvas)
+  "clouds_1", "clouds_2", "bg_prison", "logo",
+  // Home characters. NOTE: the home run loop and the walking koala are the SAME
+  // images as the in-game runner and the ground obstacle, so they are not loaded
+  // twice — see HOME_RUN_BASE / HOME_KOALA_BASE below.
+  "idle_1", "idle_2", "idle_3", "idle_4",
+  "scared", "koala_standing",
+  "car_1", "car_2",
+  // Player (one shared 915x915 square per frame)
+  "player_run_1", "player_run_2", "player_run_3", "player_run_4",
+  "player_hold_1", "player_hold_2", "player_hold_3",
+  "player_jump", "player_doublejump", "player_hurt",
+  // Obstacles (2 animation frames each)
+  "koala_running_1", "koala_running_2",
+  "pigeon_1", "pigeon_2",
+  // Collectibles
+  "collectible_points", "collectible_hodl",
+  // In-game decor — NOT delivered yet, placeholder shapes are drawn instead
+  "bg", "ground",
+  // Death sequence
+  "gameover_player_1", "gameover_player_2", "gameover_player_3",
+  "gameover_player_4", "gameover_player_5", "gameover_player_6",
+  "gameover_player_7",
+  // Leaderboard
+  "leaderboard_bg", "leaderboard_player",
+  "leaderboard_player_1", "leaderboard_player_2",
+  "leaderboard_player_3", "leaderboard_player_4"
+];
+const assets = {}; // only slots whose PNG actually loaded end up in here
+
+for (const name of ASSET_SLOTS) {
+  const img = new Image();
+  img.onload = () => { assets[name] = img; };
+  img.onerror = () => { /* file missing: the fallback shape will be drawn, no error */ };
+  img.src = "assets/" + name + ".png";
+}
+
+// Some source images have transparent padding around the artwork. This table
+// (opaque pixel bounds, measured from the PNGs) lets drawSlot render ONLY the
+// artwork — so the drawn rect, and therefore the hitbox, hugs the visible
+// pixels on all four sides. Re-measure if these images are replaced.
+const SPRITE_TRIM = {
+  "collectible_points": { x: 201, y: 202, w: 622, h: 619 },
+  "leaderboard_player_1": { x: 133, y: 220, w: 758, h: 639 },
+  "leaderboard_player_2": { x: 99, y: 191, w: 628, h: 640 },
+  "leaderboard_player_3": { x: 200, y: 216, w: 616, h: 616 },
+  "leaderboard_player_4": { x: 304, y: 155, w: 467, h: 670 }
+  // Deliberately NOT trimmed:
+  //  - player_*           : already aligned inside a shared 915x915 square
+  //  - koala_running_* /
+  //    pigeon_*           : animation frames share a canvas; trimming each one
+  //                         separately would make them jitter frame to frame
+  //  - gameover_player_*  : same, they share a 1888x1436 canvas
+  //  - collectible_hodl   : the artwork already fills its 886x1122 frame
+};
+
+// Draws the slot image if it loaded (using its trim when measured).
+// Returns true if drawn, false so the caller draws the fallback shape.
+function drawSlot(name, x, y, w, h) {
+  const img = assets[name];
+  if (!img) return false;
+  const t = SPRITE_TRIM[name];
+  if (t) ctx.drawImage(img, t.x, t.y, t.w, t.h, x, y, w, h);
+  else ctx.drawImage(img, x, y, w, h);
+  return true;
+}
+
+// width/height ratio of a slot's VISIBLE artwork (trimmed if measured)
+function slotAspect(name) {
+  const t = SPRITE_TRIM[name];
+  if (t) return t.w / t.h;
+  const img = assets[name];
+  return img ? img.width / img.height : 1;
+}
+
+// Game state machine — one screen at a time:
+// "boot" -> "home" -> "intro" -> "playing" -> "dying" -> "gameover" -> "leaderboard"
+let state = "boot";
+let bootTimer = BOOT_LINE_T + BOOT_VERSION_T; // counts down the whole boot sequence
+let homeTime = 0;              // time spent on the home screen (drives animations)
+let introTime = 0;             // time elapsed in the intro cinematic (s)
+let deathTimer = 0;            // counts down the death mini-sequence
+let menuIndexHome = 0;         // selected item on HOME (0 = start game, 1 = leaderboard)
+let menuIndexGameOver = 0;     // selected item on GAME OVER (0 = run again, 1 = leaderboard)
+
+// Best score, persisted in localStorage (wrapped in try/catch for file:// quirks)
+let bestScore = 0;
+try { bestScore = Number(localStorage.getItem("dgm_best")) || 0; } catch (e) {}
+
+// Run variables (initialized in resetRun)
+let player, obstacles, gaps, collectibles, particles, popups;
+let score, runTime, currentSpeed, worldX;
+let hazardTimer, collectTimer;
+let holding = false;       // is the jump button currently held? (drives HODL glide)
+let jumpBufferTimer = 0;   // time left on a buffered jump press
+let flashTimer = 0, flashColor = "#fff";
+let shakeTimer = 0;
+let gameOverTime = 0;      // timestamp of death, used for the restart lock
+let deathCause = "";       // short reason shown on the game-over screen
+let squash = 1;            // visual-only vertical squash of the player (landing feedback)
+let hodlMeter = 0;         // seconds of HODL glide left in the meter
+let paused = false;        // "P" pauses the run (world frozen, overlay shown)
+let bootSoundPlayed = false; // soft power-on sound, once (browsers may mute it before any click)
+let bootChimeDone = false;   // fallback: play the chime on the FIRST press (audio unlocked there)
+let cloudScroll = 0;       // home screen: horizontal offset of the cloud strip (px)
+
+function resetRun() {
+  player = {
+    x: PLAYER_X,
+    y: GROUND_Y - PLAYER_H,
+    vy: 0,               // vertical speed (positive = falling)
+    grounded: true,
+    jumpsUsed: 0,        // 0 = fresh, 1 = jumped, 2 = double jump used
+    coyoteTimer: 0       // time since the player left the ground without jumping
+  };
+  obstacles = [];        // {type:'ground'|'overhead', x, y, w, h}
+  gaps = [];             // {x, w} holes in the ground
+  collectibles = [];     // {x, y, r}
+  particles = [];        // {x, y, vx, vy, life, color, size}
+  popups = [];           // floating texts {x, y, text, life, color, big}
+  score = 0;
+  runTime = 0;
+  currentSpeed = BASE_SPEED;
+  worldX = 0;            // total distance traveled, used for ground marks animation
+  paused = false;
+  hazardTimer = 1.2;     // small breather before the first obstacle
+  collectTimer = 2.0;
+  jumpBufferTimer = 0;
+  squash = 1;
+  hodlMeter = HODL_START;
+}
+
+/* =====================================================================
+   AUDIO — tiny WebAudio beeps, no files needed
+   ===================================================================== */
+
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// Plays a short beep. freqFrom/freqTo lets us do little pitch slides.
+function beep(freqFrom, freqTo, dur, type) {
+  if (!audioCtx || SOUND_VOLUME <= 0) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const t = audioCtx.currentTime;
+  osc.type = type || "square";
+  osc.frequency.setValueAtTime(freqFrom, t);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t + dur);
+  gain.gain.setValueAtTime(SOUND_VOLUME, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + dur);
+}
+
+const sndJump = () => beep(300, 520, 0.10, "square");
+const sndDoubleJump = () => beep(420, 700, 0.10, "square");
+const sndCollect = () => beep(700, 1100, 0.09, "sine");
+const sndHodl = () => beep(400, 800, 0.12, "triangle");
+const sndSmash = () => beep(250, 90, 0.15, "square");
+const sndDeath = () => beep(220, 40, 0.45, "sawtooth");
+const sndBootUp = () => beep(160, 640, 0.7, "sine"); // soft, gentle power-on sweep
+const sndSiren = () => beep(700, 420, 0.35, "sine");  // the koala cop rolling in
+
+/* =====================================================================
+   JUICE HELPERS
+   ===================================================================== */
+
+function flash(color, dur) { flashColor = color; flashTimer = dur || FLASH_DURATION; }
+function shake() { shakeTimer = SHAKE_DURATION; }
+
+function addPopup(x, y, text, color, big) {
+  popups.push({ x, y, text, color, big: !!big, life: 0.8 });
+}
+
+function burst(x, y, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = (0.3 + Math.random() * 0.7) * speed;
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s - 60,
+      life: 0.4 + Math.random() * 0.3,
+      color,
+      size: 2 + Math.random() * 3
+    });
+  }
+}
+
+/* =====================================================================
+   INPUT — one button: Space / click / tap. Press = jump, hold = HODL.
+   ===================================================================== */
+
+// --- Screen flow helpers ---
+function goHome() { state = "home"; homeTime = 0; menuIndexHome = 0; }
+function startIntro() {
+  // The scripted home sequence (koala cop shows up, the runner bolts) plays
+  // every time START is pressed — it IS the transition into the run.
+  state = "intro";
+  introTime = 0;
+  sndSiren();
+}
+function startPlaying() { resetRun(); state = "playing"; }
+
+// Key moments of the home sequence, all derived from the constants above.
+//   0 .. koalaIn      the koala cop rolls in from the right
+//   .. koalaStop      he stops, standing still
+//   .. scared         the red character panics (scared)
+//   .. end            he sprints off to the right, black wipe, run starts
+function introTimeline() {
+  const koalaIn = HOME_SEQ_KOALA_IN;
+  const koalaStop = koalaIn + HOME_SEQ_KOALA_STOP;
+  const scared = koalaStop + HOME_SEQ_SCARED;
+  const end = scared + HOME_SEQ_RUNOUT;
+  const wipe = end - HOME_WIPE_T;                    // black wipe starts near the end
+  return { koalaIn, koalaStop, scared, wipe, end };
+}
+
+// Converts a mouse/touch event into internal canvas coordinates (0..W, 0..H)
+function canvasPos(e) {
+  const rect = canvas.getBoundingClientRect(); // AABB (axes swapped when rotated)
+  const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+  const cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+  if (canvasRotated) {
+    // undo the 90° clockwise rotation: screen-down = canvas-x, screen-left = canvas-y
+    return {
+      x: (cy - rect.top) * CANVAS_W / rect.height - SCREEN_X,
+      y: (rect.right - cx) * CANVAS_H / rect.width - SCREEN_Y
+    };
+  }
+  // convert to canvas pixels, then into screen-window (game) coordinates
+  return {
+    x: (cx - rect.left) * CANVAS_W / rect.width - SCREEN_X,
+    y: (cy - rect.top) * CANVAS_H / rect.height - SCREEN_Y
+  };
+}
+
+// Arrow up/down navigation inside menus
+function menuMove(dir) {
+  if (state === "home") menuIndexHome = (menuIndexHome + dir + 2) % 2;
+  else if (state === "gameover") menuIndexGameOver = (menuIndexGameOver + dir + 2) % 2;
+  else return;
+  beep(500, 650, 0.05, "square"); // small navigation blip
+}
+
+// Menu rows vertical positions (used for drawing AND for click/tap selection)
+const HOME_MENU_Y = [391, 452];      // vertically centered, clear of the prison decor
+const GAMEOVER_MENU_Y = [474, 535];
+
+// Clicking/tapping picks the menu row closest to the click before confirming
+function pickMenuFromClick(pos) {
+  if (!pos) return;
+  if (state === "home") {
+    menuIndexHome = Math.abs(pos.y - HOME_MENU_Y[0]) <= Math.abs(pos.y - HOME_MENU_Y[1]) ? 0 : 1;
+  } else if (state === "gameover") {
+    menuIndexGameOver = Math.abs(pos.y - GAMEOVER_MENU_Y[0]) <= Math.abs(pos.y - GAMEOVER_MENU_Y[1]) ? 0 : 1;
+  }
+}
+
+// The single action button (Space / click / tap) — behavior depends on the screen
+function pressButton(clickPos) {
+  ensureAudio();
+  // Browsers only allow audio after the first user interaction, so the boot
+  // chime attempted at page load is usually muted. Replay it here, on the
+  // very first press, while we're still at the start of the session.
+  if (!bootChimeDone) {
+    bootChimeDone = true;
+    if (state === "boot" || state === "home") sndBootUp();
+  }
+  if (paused && state === "playing") return; // frozen: only "P" resumes
+  holding = true;
+
+  switch (state) {
+    case "boot":
+      goHome(); // pressing skips the boot effect
+      return;
+
+    case "home": {
+      // Click/tap behavior: ANYWHERE starts a new game — except a click
+      // precisely ON the LEADERBOARD label. Keyboard: arrows + space/enter.
+      if (clickPos) {
+        const lbY = HOME_MENU_Y[1];
+        const onLeaderboard =
+          Math.abs(clickPos.x - W / 2) < 170 && clickPos.y > lbY - 26 && clickPos.y < lbY + 10;
+        menuIndexHome = onLeaderboard ? 1 : 0;
+      }
+      beep(600, 900, 0.08, "square"); // confirm blip
+      if (menuIndexHome === 0) startIntro();
+      else state = "leaderboard";
+      return;
+    }
+
+    case "intro":
+      startPlaying(); // pressing skips the home sequence
+      return;
+
+    case "dying":
+      return; // no input during the death sequence
+
+    case "gameover":
+      if (performance.now() - gameOverTime < RESTART_LOCK * 1000) return;
+      pickMenuFromClick(clickPos);
+      beep(600, 900, 0.08, "square"); // confirm blip
+      if (menuIndexGameOver === 0) startPlaying(); // restart: straight back in
+      else state = "leaderboard";
+      return;
+
+    case "leaderboard": {
+      // brief lock right after a death so the leaderboard isn't skipped by accident
+      if (performance.now() - gameOverTime < RESTART_LOCK * 1000) return;
+      // A click/tap on one of the buttons triggers it; anything else goes home
+      if (clickPos) {
+        const b = leaderboardButtons().find(b =>
+          clickPos.x >= b.x && clickPos.x <= b.x + b.w &&
+          clickPos.y >= b.y && clickPos.y <= b.y + b.h);
+        if (b) { leaderboardButtonAction(b.id); return; }
+      }
+      // Any other press starts a NEW GAME. Restarts go straight into the run:
+      // the home sequence is the START flow, not something to sit through again.
+      startPlaying();
+      return;
+    }
+  }
+
+  // state === "playing": try to jump
+  const canGroundJump = player.grounded || (player.coyoteTimer < COYOTE_TIME && player.jumpsUsed === 0);
+  if (canGroundJump) {
+    doJump(JUMP_VELOCITY, 1);
+    sndJump();
+  } else if (player.jumpsUsed < 2) {
+    doJump(DOUBLE_JUMP_VELOCITY, 2);
+    sndDoubleJump();
+  } else {
+    // No jump available: buffer the press so it fires the instant we land
+    jumpBufferTimer = JUMP_BUFFER_TIME;
+  }
+}
+
+function doJump(velocity, jumpsUsedValue) {
+  player.vy = -velocity;
+  player.grounded = false;
+  player.jumpsUsed = jumpsUsedValue;
+  squash = 1.15; // slight vertical stretch on takeoff (visual only)
+  burst(player.x + PLAYER_W / 2, player.y + PLAYER_H, "#999", 6, 120);
+}
+
+function releaseButton() {
+  holding = false;
+  // "Jump cut": releasing while still going up shortens the jump => tap = small hop
+  if (state === "playing" && player.vy < 0) {
+    player.vy *= JUMP_CUT_MULT;
+  }
+}
+
+// Keyboard: Space/Enter = action button everywhere; ArrowUp = jump in game, navigate in menus
+window.addEventListener("keydown", (e) => {
+  if (!["Space", "Enter", "ArrowUp", "ArrowDown", "KeyP"].includes(e.code)) return;
+  e.preventDefault();
+  if (e.repeat) return; // ignore auto-repeat, we handle "hold" ourselves
+  if (e.code === "KeyP") {
+    // "P" toggles pause, only during a run
+    if (state === "playing") paused = !paused;
+    return;
+  }
+  const inMenu = (state === "home" || state === "gameover");
+  if (e.code === "ArrowUp" && inMenu) { menuMove(-1); return; }
+  if (e.code === "ArrowDown") { if (inMenu) menuMove(1); return; }
+  pressButton();
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space" || e.code === "Enter" || e.code === "ArrowUp") releaseButton();
+});
+
+// Mouse & touch are captured on the WHOLE window: on a phone you can tap
+// anywhere on the screen to jump, not just on the console art.
+window.addEventListener("mousedown", (e) => { e.preventDefault(); pressButton(canvasPos(e)); });
+window.addEventListener("mouseup", releaseButton);
+
+window.addEventListener("touchstart", (e) => { e.preventDefault(); pressButton(canvasPos(e)); }, { passive: false });
+window.addEventListener("touchend", (e) => { e.preventDefault(); releaseButton(); }, { passive: false });
+window.addEventListener("touchcancel", releaseButton);
+
+/* =====================================================================
+   PROCEDURAL GENERATION
+   ===================================================================== */
+
+function rand(min, max) { return min + Math.random() * (max - min); }
+
+// Opaque bounds of each obstacle frame, as fractions of its own frame.
+// Only used by HITBOX_MODE === "art", to demonstrate the wobble a per-frame
+// hitbox produces: look at the pigeon, whose two frames disagree wildly.
+const OBSTACLE_ART_BOX = {
+  "koala_running_1": { x0: 0.000, y0: 0.000, x1: 1.000, y1: 0.979 },
+  "koala_running_2": { x0: 0.000, y0: 0.000, x1: 1.000, y1: 0.979 },
+  "pigeon_1":    { x0: 0.086, y0: 0.000, x1: 0.968, y1: 0.774 },
+  "pigeon_2":    { x0: 0.000, y0: 0.242, x1: 1.000, y1: 1.000 }
+};
+
+// Base slot name for an obstacle type ("koala_running" / "pigeon")
+function obstacleBaseName(type) {
+  return type === "ground" ? "koala_running" : "pigeon";
+}
+
+// How many animation frames actually loaded for this obstacle type (0 = none)
+function obstacleFrameCount(type) {
+  const base = obstacleBaseName(type);
+  let n = 0;
+  while (assets[base + "_" + (n + 1)]) n++;
+  return n;
+}
+
+// The slot to DRAW for this obstacle right now. The koala and the pigeon are
+// 2-frame loops; each obstacle carries its own animOff so they do not all flap
+// in lockstep. Returns null when no image loaded (a plain rect is drawn).
+function obstacleFrameSlot(o) {
+  const base = obstacleBaseName(o.type);
+  const n = obstacleFrameCount(o.type);
+  if (n === 0) return null;
+  const fps = o.type === "ground" ? KOALA_ANIM_FPS : PIGEON_ANIM_FPS;
+  const f = Math.floor(performance.now() / 1000 * fps + o.animOff) % n;
+  return base + "_" + (f + 1);
+}
+
+// The full sprite FRAME rect (what gets drawn). The obstacle's x/y/w/h is its
+// hitbox, so the frame is offset from it by the dx/dy computed at spawn time.
+function obstacleFrameRect(o) {
+  return { x: o.x + o.dx, y: o.y + o.dy, w: o.fw, h: o.fh };
+}
+
+// The obstacle's COLLISION box. In "body" mode this is simply x/y/w/h, a fixed
+// box on the creature's body that never moves with the animation. In "art" mode
+// it is recomputed from the current frame's opaque bounds instead.
+function obstacleHitbox(o) {
+  if (HITBOX_MODE !== "art") return { x: o.x, y: o.y, w: o.w, h: o.h };
+  const slot = obstacleFrameSlot(o);
+  const box = slot && OBSTACLE_ART_BOX[slot];
+  if (!box) return { x: o.x, y: o.y, w: o.w, h: o.h };
+  const f = obstacleFrameRect(o);
+  return {
+    x: f.x + f.w * box.x0,
+    y: f.y + f.h * box.y0,
+    w: f.w * (box.x1 - box.x0),
+    h: f.h * (box.y1 - box.y0)
+  };
+}
+
+// The pigeon's y for its current position along the screen. Both paths are
+// anchored on o.baseY — the bird's LOWEST point, bottom edge on the overhead
+// clearance line — and only ever lift it ABOVE that, so running underneath
+// always stays possible.
+//   "wave"     bobs up and down as it crosses
+//   "diagonal" enters high and glides steadily down to the clearance line
+function pigeonY(o) {
+  if (o.motion === "diagonal") {
+    // Progress is driven by x, so the descent is smooth and speed-independent.
+    // It bottoms out at the PLAYER's column, not at the left edge — otherwise
+    // the bird would still be high when it passes him and the dive would never
+    // be felt. Past that point it simply holds the clearance line.
+    const span = W + 40 - PLAYER_X;
+    const p = Math.max(0, Math.min(1, (o.x - PLAYER_X) / span)); // 1 at spawn -> 0 at the player
+    return o.baseY - PIGEON_DIAGONAL_RISE * p;
+  }
+  // Sine mapped to [0..1] so the bird touches baseY at the bottom of each dip
+  const wave = 0.5 + 0.5 * Math.sin(runTime * PIGEON_WAVE_SPEED + o.wavePhase);
+  return o.baseY - PIGEON_WAVE_AMPLITUDE * wave;
+}
+
+// Turns a body height into the full frame rect offsets. The size presets always
+// describe the BODY (the part the player must clear), so difficulty stays
+// predictable no matter how much empty wing-space a frame carries around it.
+function obstacleFrameMetrics(type, bodyH) {
+  const box = OBSTACLE_BODY_BOX[type];
+  const base = obstacleBaseName(type);
+  const img = assets[base + "_1"] || assets[base];
+  const fh = bodyH / (box.y1 - box.y0);
+  const fw = img ? fh * (img.width / img.height) : bodyH;
+  return {
+    fw, fh,
+    bodyW: fw * (box.x1 - box.x0),
+    dx: -fw * box.x0,   // frame left, relative to the hitbox left
+    dy: -fh * box.y0    // frame top,  relative to the hitbox top
+  };
+}
+
+// The collectible's slot name for its kind
+function collectibleSlotName(kind) {
+  if (kind === "hodl") return "collectible_hodl";
+  return assets["collectible_points"] ? "collectible_points" : "collectible_points";
+}
+
+// Pickup box matching the drawn artwork (height = 2r, width follows the art)
+function collectibleBox(c) {
+  const name = collectibleSlotName(c.kind);
+  const ar = assets[name] ? slotAspect(name) : 1;
+  const h = c.r * 2, w = h * ar;
+  return { x: c.x - w / 2, y: c.y - c.r, w, h };
+}
+
+function spawnHazard() {
+  const spawnX = W + 40; // just off-screen to the right
+  const roll = Math.random();
+
+  if (roll < 0.45) {
+    // Ground obstacle (the koala cop): jump over it. The preset height is the
+    // BODY height; the frame around it is sized from the artwork's ratio.
+    const variant = Math.floor(Math.random() * KOALA_SIZES.length);
+    const s = KOALA_SIZES[variant];
+    const m = obstacleFrameMetrics("ground", s.h);
+    obstacles.push({
+      type: "ground", variant, animOff: Math.random() * 10,
+      x: spawnX, y: GROUND_Y - s.h, w: m.bodyW || s.w, h: s.h,
+      fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy
+    });
+  } else if (roll < 0.75) {
+    // Overhead obstacle (the pigeon): run under it (do NOT jump). The BODY's
+    // bottom edge always sits on the same clearance line, so it stays playable
+    // however far the wings stretch outside the frame.
+    const variant = Math.floor(Math.random() * PIGEON_SIZES.length);
+    const s = PIGEON_SIZES[variant];
+    const m = obstacleFrameMetrics("overhead", s.h);
+    // baseY is the bird's LOWEST position: its bottom edge on the clearance
+    // line. Every flight path only ever lifts it above that, never below, so
+    // there is always room to run underneath.
+    const baseY = GROUND_Y - PLAYER_H - OVERHEAD_CLEARANCE - s.h;
+    const o = {
+      type: "overhead", variant, animOff: Math.random() * 10,
+      x: spawnX, y: baseY, baseY, w: m.bodyW || s.w, h: s.h,
+      fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy,
+      motion: Math.random() < PIGEON_DIAGONAL_CHANCE ? "diagonal" : "wave",
+      wavePhase: Math.random() * Math.PI * 2
+    };
+    o.y = pigeonY(o);
+    obstacles.push(o);
+  } else {
+    // Gap in the ground: jump across
+    const w = rand(GAP_WIDTH_MIN, GAP_WIDTH_MAX);
+    gaps.push({ x: spawnX, w });
+    // A gap "occupies" time on screen: push the next hazard a bit further away
+    hazardTimer += w / currentSpeed;
+  }
+
+  // A newly spawned obstacle also evicts any collectible it would swallow
+  const lastObstacle = obstacles[obstacles.length - 1];
+  if (lastObstacle && lastObstacle.x >= spawnX - 1) {
+    collectibles = collectibles.filter(c => !overlapsWithMargin(collectibleBox(c), lastObstacle, 18));
+  }
+
+  // Time-based spacing: at higher speed the pixel distance grows automatically,
+  // so the pattern stays physically jumpable at any speed.
+  hazardTimer += rand(SPAWN_GAP_MIN, SPAWN_GAP_MAX);
+}
+
+function spawnCollectible() {
+  // Pick the collectible kind from the spawn weights
+  const kind = Math.random() < COLLECT_WEIGHT_HODL ? "hodl" : "points";
+
+  // RULE: a collectible must never sit inside (or touch) an obstacle.
+  // Try a few heights near the spawn point; give up this cycle if blocked.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const y = GROUND_Y - rand(41, 255); // low = grabbed running, high = needs a jump
+    const c = { x: W + 40, y, r: COLLECT_RADIUS, kind };
+    const box = collectibleBox(c);
+    const blocked = obstacles.some(o => o.x + o.w > W - 80 && overlapsWithMargin(box, o, 18));
+    if (!blocked) { collectibles.push(c); break; }
+  }
+  collectTimer += rand(COLLECT_SPAWN_MIN, COLLECT_SPAWN_MAX);
+}
+
+/* =====================================================================
+   COLLISIONS
+   ===================================================================== */
+
+// The player's collision box, slightly shrunk for forgiveness.
+// IMPORTANT: never changes during a run — only the visuals do.
+function playerHitbox() {
+  return {
+    x: player.x + HITBOX_PAD,
+    y: player.y + HITBOX_PAD,
+    w: PLAYER_W - HITBOX_PAD * 2,
+    h: PLAYER_H - HITBOX_PAD * 2
+  };
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// Overlap test with a safety margin around rect b (used for spawn rules)
+function overlapsWithMargin(a, b, m) {
+  return a.x - m < b.x + b.w && a.x + a.w + m > b.x && a.y - m < b.y + b.h && a.y + a.h + m > b.y;
+}
+
+// Is the center of the player's feet currently above a hole?
+function overGap() {
+  const footCenter = player.x + PLAYER_W / 2;
+  return gaps.some(g => footCenter > g.x && footCenter < g.x + g.w);
+}
+
+/* =====================================================================
+   DEATH
+   ===================================================================== */
+
+function die(cause) {
+  state = "dying"; // short death sequence first; the GAME OVER screen comes after
+  deathTimer = DEATH_SEQUENCE_DURATION;
+  deathCause = cause;
+  flash("#ff2020", 0.2);
+  shake();
+  sndDeath();
+  burst(player.x + PLAYER_W / 2, player.y + PLAYER_H / 2, "#333", 18, 260);
+  if (score > bestScore) {
+    bestScore = Math.floor(score);
+    try { localStorage.setItem("dgm_best", String(bestScore)); } catch (e) {}
+  }
+  // Online (signed-in players only): push the score — the DB keeps only the
+  // best — then refresh the global board. Fire-and-forget: any network
+  // failure is swallowed and the game never waits on it.
+  if (sbUser) {
+    try { submitScore(sbUser, Math.floor(score)).then(refreshOnline).catch(() => {}); } catch (e) {}
+  }
+}
+
+function update(dt) {
+  // Paused: the whole world (and its juice) stands still
+  if (paused && state === "playing") return;
+
+  // --- Global timers (run in every state, for juice) ---
+  if (flashTimer > 0) flashTimer -= dt;
+  if (shakeTimer > 0) shakeTimer -= dt;
+  cloudScroll += CLOUD_SCROLL_SPEED * dt; // home screen clouds keep drifting
+  updateParticles(dt);
+  updatePopups(dt);
+
+  // --- Screen flow timers ---
+  if (state === "boot") {
+    // Soft power-on sound, once. NOTE: browsers block audio before the first
+    // user interaction, so on a fresh page load it may stay silent.
+    if (!bootSoundPlayed) {
+      bootSoundPlayed = true;
+      ensureAudio();
+      sndBootUp();
+    }
+    bootTimer -= dt;
+    if (bootTimer <= 0) goHome();
+  } else if (state === "home") {
+    homeTime += dt; // drives the logo slide-in + the idle loop
+  } else if (state === "intro") {
+    const before = introTime;
+    introTime += dt;
+    const tl = introTimeline();
+    // The koala plants himself: a thud, and the runner realises he is caught
+    if (before < tl.koalaIn && introTime >= tl.koalaIn) {
+      shake();
+      sndSmash();
+    }
+    if (before < tl.koalaStop && introTime >= tl.koalaStop) sndSiren();
+    if (introTime >= tl.end) startPlaying();
+  } else if (state === "dying") {
+    // The koala reaching the player is a beat of its own: a thud and a shake,
+    // fired exactly once as the sequence crosses DEATH_CATCH_FRAC.
+    const catchAt = DEATH_SEQUENCE_DURATION * (1 - DEATH_CATCH_FRAC);
+    const before = deathTimer;
+    deathTimer -= dt;
+    if (before > catchAt && deathTimer <= catchAt) {
+      shake();
+      sndSmash();
+    }
+    if (deathTimer <= 0) {
+      // The death sequence flows STRAIGHT into the leaderboard (no menu screen)
+      state = "leaderboard";
+      gameOverTime = performance.now(); // short input lock so a press can't skip it instantly
+    }
+  }
+
+  if (state !== "playing") return;
+
+  runTime += dt;
+
+  // --- Speed: ease toward the target, which ramps up with time ---
+  const targetSpeed = Math.min(MAX_SPEED, BASE_SPEED + SPEED_RAMP * runTime);
+  // Smooth easing so speed changes never feel like a hard snap
+  currentSpeed += (targetSpeed - currentSpeed) * Math.min(1, 3 * dt);
+
+  const dx = currentSpeed * dt; // pixels traveled this frame
+  worldX += dx;
+  score += dx * SCORE_PER_PIXEL;
+
+  // --- Player physics ---
+  player.vy += GRAVITY * dt;
+
+  // HODL: while held and falling, clamp the fall to a slow controlled glide.
+  // The glide now DRAINS the hodl meter; when it's empty, normal fall resumes
+  // (refill it by grabbing collectible_hodl tokens).
+  if (holding && player.vy > 0 && hodlMeter > 0) {
+    player.vy = Math.min(player.vy, HODL_FALL_SPEED);
+    hodlMeter = Math.max(0, hodlMeter - dt);
+  } else {
+    player.vy = Math.min(player.vy, MAX_FALL_SPEED);
+  }
+
+  player.y += player.vy * dt;
+
+  const standingOnGround = !overGap();
+
+  if (player.y + PLAYER_H >= GROUND_Y && standingOnGround && player.vy >= 0) {
+    // Landing
+    const wasAirborne = !player.grounded;
+    player.y = GROUND_Y - PLAYER_H;
+    player.vy = 0;
+    player.grounded = true;
+    player.jumpsUsed = 0;
+    player.coyoteTimer = 0;
+    if (wasAirborne) {
+      squash = 0.8; // small squash on landing (visual only)
+      // Buffered jump fires immediately for a snappy feel
+      if (jumpBufferTimer > 0) {
+        jumpBufferTimer = 0;
+        doJump(JUMP_VELOCITY, 1);
+        sndJump();
+      }
+    }
+  } else {
+    // Airborne (jumping, or walking over a hole)
+    if (player.grounded) {
+      player.grounded = false;
+      player.coyoteTimer = 0; // just left the ground: coyote window starts
+    } else {
+      player.coyoteTimer += dt;
+    }
+  }
+
+  if (jumpBufferTimer > 0) jumpBufferTimer -= dt;
+
+  // Squash eases back to 1 (visual only, hitbox untouched)
+  squash += (1 - squash) * Math.min(1, 10 * dt);
+
+  // Fell into a hole
+  if (player.y > H + 40) { die("fell into the void"); return; }
+
+  // --- Spawners ---
+  hazardTimer -= dt;
+  if (hazardTimer <= 0) spawnHazard();
+  collectTimer -= dt;
+  if (collectTimer <= 0) spawnCollectible();
+
+  // --- Move & clean up world objects ---
+  for (const o of obstacles) {
+    o.x -= dx;
+    // Pigeons fly: their hitbox follows the sprite, so what you see is what hits
+    if (o.type === "overhead") o.y = pigeonY(o);
+  }
+  for (const g of gaps) g.x -= dx;
+  for (const c of collectibles) c.x -= dx;
+  obstacles = obstacles.filter(o => o.x + o.w > -60);
+  gaps = gaps.filter(g => g.x + g.w > -60);
+  collectibles = collectibles.filter(c => c.x + c.r > -60);
+
+  // --- Collisions ---
+  const hb = playerHitbox();
+
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    // obstacleHitbox() honours HITBOX_MODE, so switching modes changes what
+    // actually kills you without touching anything that is drawn.
+    if (rectsOverlap(hb, obstacleHitbox(o))) {
+      die(o.type === "ground" ? "caught by a koala cop" : "hit by a pigeon");
+      return;
+    }
+  }
+
+  for (let i = collectibles.length - 1; i >= 0; i--) {
+    const c = collectibles[i];
+    const box = collectibleBox(c); // pickup box = exactly the drawn artwork
+    if (rectsOverlap(hb, box)) {
+      collectibles.splice(i, 1);
+      if (c.kind === "hodl") {
+        hodlMeter = Math.min(HODL_METER_MAX, hodlMeter + HODL_REFILL);
+        addPopup(c.x, c.y - 14, "+HODL", "#30c060");
+        sndHodl();
+      } else {
+        score += COLLECT_VALUE;
+        addPopup(c.x, c.y - 14, "+" + COLLECT_VALUE, "#444");
+        sndCollect();
+      }
+      burst(c.x, c.y, "#777", 8, 150);
+    }
+  }
+}
+
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.life -= dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 500 * dt; // light gravity on particles
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+function updatePopups(dt) {
+  for (const p of popups) {
+    p.life -= dt;
+    p.y -= 40 * dt; // floats upward
+  }
+  popups = popups.filter(p => p.life > 0);
+}
+
+/* =====================================================================
+   DRAWING
+   ===================================================================== */
+
+// Traces the console's screen opening as a rounded rect, inset by SCREEN_INSET.
+// Used as an even-odd hole so the cabinet can be drawn over the game.
+function screenOpeningPath() {
+  const x = SCREEN_X + SCREEN_INSET, y = SCREEN_Y + SCREEN_INSET;
+  const w = W - SCREEN_INSET * 2, h = H - SCREEN_INSET * 2;
+  const r = Math.min(SCREEN_RADIUS, w / 2, h / 2);
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+// A soft shadow along the inside edges of the opening, as if the picture were
+// set back inside the console shell. Drawn in screen space (0..W x 0..H).
+function drawScreenInnerShadow() {
+  const d = SCREEN_INNER_SHADOW;
+  if (d <= 0) return;
+  const edge = (x0, y0, x1, y1, alpha, rx, ry, rw, rh) => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, `rgba(0,0,0,${alpha})`);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(rx, ry, rw, rh);
+  };
+  edge(0, 0, 0, d, 0.32, 0, 0, W, d);              // top — deepest, light falls from above
+  edge(0, 0, d, 0, 0.24, 0, 0, d, H);              // left
+  edge(0, H, 0, H - d, 0.17, 0, H - d, W, d);      // bottom
+  edge(W, 0, W - d, 0, 0.17, W - d, 0, d, H);      // right
+}
+
+function draw() {
+  // Layer 1 — flat blue behind everything (no background image any more).
+  ctx.fillStyle = CANVAS_BG;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  // Layer 2 — the GAME goes down first, so the console can be laid over it.
+  // A black backing sits under it in case a screen ever leaves a gap.
+  ctx.fillStyle = "#000";
+  ctx.fillRect(SCREEN_X, SCREEN_Y, W, H);
+  ctx.save();
+  ctx.translate(SCREEN_X, SCREEN_Y);
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.clip();
+  drawScreen();
+  drawScreenInnerShadow();
+  ctx.restore();
+
+  // Layer 3 — the console ON TOP, with the screen opening punched out of it.
+  // The path is the full canvas PLUS the opening, filled even-odd: the opening
+  // becomes a hole, so the cabinet's bezel and rounded corners overlap the
+  // game rather than the game covering the art.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, CANVAS_W, CANVAS_H);
+  screenOpeningPath();
+  ctx.clip("evenodd");
+  if (!drawSlot("frame_cabinet", 0, 0, CANVAS_W, CANVAS_H)) {
+    ctx.fillStyle = "#191114"; // fallback bezel; the hole keeps the game visible
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  }
+  ctx.restore();
+}
+
+// One game screen, drawn in coordinates 0..W x 0..H (the console's window)
+function drawScreen() {
+  if (state === "boot")        { drawBoot();        return; }
+  if (state === "home")        { drawHome();        return; }
+  if (state === "intro")       { drawIntro();       return; }
+  if (state === "leaderboard") { drawLeaderboard(); return; }
+
+  // --- Below: the game world (states "playing", "dying" and "gameover") ---
+  ctx.save();
+
+  // Screen shake offset
+  if (shakeTimer > 0) {
+    const s = SHAKE_STRENGTH * (shakeTimer / SHAKE_DURATION);
+    ctx.translate(rand(-s, s), rand(-s, s));
+  }
+
+  // --- Background (image slot first, placeholder otherwise) ---
+  // NOTE: bg.png / ground.png are not delivered yet (Benoit).
+  // Until they land, the flat placeholder below stands in for the biome.
+  if (!drawSlot("bg", -20, -20, W + 40, H + 40)) {
+    ctx.fillStyle = "#f7f7f7";
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+  }
+
+  // Chrome-dino style clouds, drifting slower than the ground
+  drawClouds();
+
+  const ink = "#2a2a2a";       // main line/obstacle color
+  const voidColor = "#1c1c1c"; // color inside ground holes
+
+  // --- Ground (image slot tiled & scrolling; line + marks as placeholder) ---
+  const groundImg = assets["ground"];
+  if (groundImg) {
+    const stripH = H - GROUND_Y;
+    const tileW = groundImg.width * (stripH / groundImg.height); // keep the image's aspect ratio
+    for (let gx = -(worldX % tileW) - tileW; gx < W + tileW; gx += tileW) {
+      ctx.drawImage(groundImg, gx, GROUND_Y, tileW, stripH);
+    }
+  } else {
+    ctx.fillStyle = ink;
+    ctx.fillRect(-20, GROUND_Y, W + 40, 3);
+    // Small marks scrolling on the ground to sell the speed (dino style)
+    ctx.fillStyle = "#b5b5b5";
+    for (let i = 0; i < 22; i++) {
+      const mx = ((i * 104) - (worldX % 104));
+      ctx.fillRect(mx, GROUND_Y + 9 + (i % 3) * 7, 17, 2);
+    }
+  }
+
+  // --- Holes cut into the ground (drawn over the ground, image or not) ---
+  for (const g of gaps) {
+    ctx.fillStyle = voidColor;
+    ctx.fillRect(g.x, GROUND_Y - 3, g.w, H - GROUND_Y + 3);
+  }
+
+  // --- Obstacles: the animated koala / pigeon, drawn as FULL frames.
+  // The frames share a canvas, so drawing them untrimmed is what keeps the
+  // creature from sliding around between frames. ---
+  for (const o of obstacles) {
+    const f = obstacleFrameRect(o);
+    const slot = obstacleFrameSlot(o);
+    if (slot && drawSlot(slot, f.x, f.y, f.w, f.h)) continue;
+    ctx.fillStyle = "#2a2a2a"; // placeholder rect on the hitbox itself
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+  }
+
+  // --- Collectibles: drawn rect = pickup hitbox = the visible artwork ---
+  for (const c of collectibles) {
+    const box = collectibleBox(c);
+    if (drawSlot(collectibleSlotName(c.kind), box.x, box.y, box.w, box.h)) continue;
+    // Circle fallback, one color per kind so they stay readable
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.fillStyle = c.kind === "hodl" ? "#30c060" : "#909090";
+    ctx.fill();
+    ctx.beginPath(); // small inner dot for readability
+    ctx.arc(c.x, c.y, c.r * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = "#f7f7f7";
+    ctx.fill();
+  }
+
+  // --- Player (the death sequence draws its own character instead) ---
+  if (state === "playing") drawPlayer();
+
+  // Debug overlay: green boxes = the REAL collision rects of everything
+  // (player, obstacles, collectibles). Obstacles also get their sprite FRAME
+  // outlined in faint blue, so the gap between art and hitbox is visible.
+  // Toggle with DEBUG_HITBOX; switch HITBOX_MODE to compare the two schemes.
+  if (DEBUG_HITBOX && state === "playing") {
+    drawHitboxDebug(); // player box
+    ctx.lineWidth = 2;
+    for (const o of obstacles) {
+      const f = obstacleFrameRect(o);
+      ctx.strokeStyle = "rgba(60,140,255,0.45)";
+      ctx.strokeRect(f.x, f.y, f.w, f.h);
+      const hb = obstacleHitbox(o);
+      ctx.strokeStyle = "#00e050";
+      ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+    }
+    ctx.strokeStyle = "#00e050";
+    for (const c of collectibles) { const b = collectibleBox(c); ctx.strokeRect(b.x, b.y, b.w, b.h); }
+    ctx.fillStyle = "#00e050";
+    ctx.font = "bold 13px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("HITBOX: " + HITBOX_MODE, HUD_INSET_X, H - 52);
+  }
+
+  // --- Particles ---
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / 0.7);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+
+  // --- Floating score popups ---
+  for (const p of popups) {
+    ctx.globalAlpha = Math.max(0, p.life / 0.8);
+    ctx.fillStyle = p.color;
+    ctx.font = p.big ? "bold 64px monospace" : "bold 18px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+
+  // --- HUD ---
+  // No backdrop panels; the HUD simply sits away from the screen edges.
+  const hudColor = "#2a2a2a";
+  ctx.fillStyle = hudColor;
+  ctx.font = "bold 30px monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(String(Math.floor(score)).padStart(5, "0"), W - HUD_INSET_X, HUD_INSET_Y + 12);
+  ctx.font = "18px monospace";
+  ctx.fillText("HI " + String(bestScore).padStart(5, "0"), W - HUD_INSET_X, HUD_INSET_Y + 40);
+
+  // HODL meter (glide fuel), top left
+  const meterW = 178, meterH = 17, mx = HUD_INSET_X, my = HUD_INSET_Y + 7;
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.fillRect(mx, my, meterW, meterH);
+  ctx.fillStyle = "#30c060";
+  ctx.fillRect(mx, my, meterW * (hodlMeter / HODL_METER_MAX), meterH);
+  ctx.strokeStyle = hudColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(mx, my, meterW, meterH);
+  ctx.font = "bold 15px monospace";
+  ctx.textAlign = "left";
+  ctx.fillStyle = hudColor;
+  ctx.fillText("HODL", mx, my - 9);
+
+  // Controls reminder, always visible during the run
+  if (state === "playing") drawControlsHint(H - 34, true);
+
+  ctx.restore();
+
+  // --- Screen flash (drawn on top, ignores shake) ---
+  if (flashTimer > 0) {
+    ctx.globalAlpha = Math.min(0.5, flashTimer / FLASH_DURATION * 0.5);
+    ctx.fillStyle = flashColor;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Overlays on top of the (frozen) world ---
+  if (state === "dying") drawDeathSequence();
+  if (state === "gameover") drawGameOverScreen();
+
+  // --- Pause overlay (P) on top of everything in the window ---
+  if (paused && state === "playing") drawPauseOverlay();
+}
+
+// Draws text in a chunky PIXELATED style: rendered small on an offscreen
+// canvas, then blown up with image smoothing disabled.
+const pixelCanvas = document.createElement("canvas");
+const pixelCtx = pixelCanvas.getContext("2d");
+function drawPixelText(text, cx, cy, smallPx, scaleFactor, color) {
+  pixelCtx.font = "bold " + smallPx + "px monospace";
+  const tw = Math.ceil(pixelCtx.measureText(text).width) + 4;
+  const th = smallPx + 6;
+  pixelCanvas.width = tw;  // resizing also clears the offscreen canvas
+  pixelCanvas.height = th;
+  pixelCtx.font = "bold " + smallPx + "px monospace"; // re-set after the resize
+  pixelCtx.textAlign = "left";
+  pixelCtx.textBaseline = "top";
+  pixelCtx.fillStyle = color;
+  pixelCtx.fillText(text, 2, 2);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false; // this is what makes the pixels chunky
+  ctx.drawImage(pixelCanvas, cx - (tw * scaleFactor) / 2, cy - (th * scaleFactor) / 2, tw * scaleFactor, th * scaleFactor);
+  ctx.restore();
+}
+
+// Pause: gray see-through filter + a simple text panel (no image any more)
+function drawPauseOverlay() {
+  ctx.fillStyle = "rgba(30,30,34,0.62)"; // the run stays visible behind
+  ctx.fillRect(0, 0, W, H);
+
+  const pw = 380, ph = 190;
+  const px = W / 2 - pw / 2, py = H / 2 - ph / 2;
+  ctx.fillStyle = "rgba(18,18,22,0.9)";
+  ctx.fillRect(px, py, pw, ph);
+  ctx.strokeStyle = "#f5f5f5";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(px, py, pw, ph);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f5f5f5";
+  ctx.font = "bold 52px monospace";
+  ctx.fillText("PAUSE", W / 2, py + 78);
+
+  ctx.font = "15px monospace";
+  ctx.fillStyle = "#cfcfcf";
+  ctx.fillText("SCORE " + String(Math.floor(score)).padStart(5, "0"), W / 2, py + 112);
+
+  drawKeyCap(W / 2 - 74, py + 134, 32, 24, "P");
+  ctx.fillStyle = "#cfcfcf";
+  ctx.font = "15px monospace";
+  ctx.textAlign = "left";
+  ctx.fillText("resume", W / 2 - 32, py + 151);
+}
+
+function drawPlayer() {
+  const px = player.x;
+  const py = player.y;
+
+  // --- Sprite path (visuals only — the collision hitbox NEVER changes) ---
+  const img = assets[playerSpriteName()];
+  if (img) {
+    drawSpriteAnchored(img, playerSpriteName());
+    drawHodlTrail(px, py);
+    return;
+  }
+
+  // --- Placeholder path: a plain dark runner, used while a frame is missing ---
+  // Squash is VISUAL ONLY: we scale the drawing around the feet,
+  // the collision hitbox stays exactly PLAYER_W x PLAYER_H.
+  const drawH = PLAYER_H * squash;
+  const drawW = PLAYER_W * (2 - squash); // conserve area: squash down = widen
+  const ox = px + (PLAYER_W - drawW) / 2;
+  const oy = py + (PLAYER_H - drawH);
+
+  ctx.fillStyle = "#2a2a2a";
+  ctx.fillRect(ox, oy, drawW, drawH);
+  ctx.fillStyle = "#f7f7f7"; // eye
+  ctx.fillRect(ox + drawW - 13, oy + 9, 6, 6);
+
+  // Little legs while running on the ground (simple 2-frame animation)
+  if (player.grounded) {
+    const legPhase = Math.floor(worldX / 30) % 2;
+    ctx.fillStyle = "#2a2a2a";
+    if (legPhase === 0) {
+      ctx.fillRect(ox + 5, GROUND_Y - 5, 7, 5);
+      ctx.fillRect(ox + drawW - 12, GROUND_Y - 9, 7, 9);
+    } else {
+      ctx.fillRect(ox + 5, GROUND_Y - 9, 7, 9);
+      ctx.fillRect(ox + drawW - 12, GROUND_Y - 5, 7, 5);
+    }
+  }
+
+  drawHodlTrail(px, py);
+}
+
+// The player's sprite set. Only one set now that phase 2 is gone.
+function playerSpritePrefix() {
+  return "player";
+}
+
+// Picks the sprite frame matching the current player state
+function playerSpriteName() {
+  const pre = playerSpritePrefix();
+  if (!player.grounded) {
+    // Hold frames only show while ACTUALLY gliding (button held + meter not empty)
+    if (holding && player.vy > 0 && hodlMeter > 0) {
+      const f = Math.floor(runTime * ANIM_FPS) % HOLD_FRAME_COUNT + 1;
+      return pre + "_hold_" + f;
+    }
+    if (player.jumpsUsed >= 2) return pre + "_doublejump"; // after the 2nd jump
+    return pre + "_jump";                                  // first jump / simple fall
+  }
+  const f = Math.floor(runTime * ANIM_FPS) % RUN_FRAME_COUNT + 1;
+  return pre + "_run_" + f; // running on the ground
+}
+
+// Draws a player sprite. Every frame shares ONE 915x915 square with the artwork
+// already aligned inside it, so the whole square is drawn UNTRIMMED at the same
+// fixed height (PLAYER_SPRITE_H) and the character never shifts or resizes
+// between the run, jump, doublejump and hold states.
+//
+// One exception: player_hurt holds a character thrown through the air, drawn
+// vertically CENTERED in its square rather than standing on the bottom edge —
+// so it is anchored on the hitbox's CENTER instead of on its feet line.
+function drawSpriteAnchored(img, name) {
+  // squash is the takeoff/landing juice — visual only, hitbox untouched
+  const h = PLAYER_SPRITE_H * squash;
+  const w = PLAYER_SPRITE_H * (img.width / img.height) * (2 - squash);
+  const anchorX = player.x + PLAYER_W / 2; // horizontal center of the hitbox
+  if (name && name.endsWith("_hurt")) {
+    const anchorY = player.y + PLAYER_H / 2; // CENTER anchor: he is airborne
+    ctx.drawImage(img, anchorX - w / 2, anchorY - h / 2, w, h);
+    return;
+  }
+  const anchorY = player.y + PLAYER_H;      // feet line of the hitbox (= ground contact)
+  ctx.drawImage(img, anchorX - w / 2, anchorY - h, w, h);
+}
+
+// Debug: draws the REAL collision box (with its forgiveness padding) over the sprite
+function drawHitboxDebug() {
+  const hb = playerHitbox();
+  ctx.strokeStyle = "#00e050";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+}
+
+// HODL glide feedback: small trail lines behind the player while gliding
+function drawHodlTrail(px, py) {
+  if (!(holding && !player.grounded && player.vy > 0 && hodlMeter > 0)) return;
+  ctx.strokeStyle = "rgba(42,42,42,0.4)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px - 9, py + 7); ctx.lineTo(px - 21, py + 2);
+  ctx.moveTo(px - 9, py + 24); ctx.lineTo(px - 24, py + 21);
+  ctx.stroke();
+}
+
+// Soft fluffy clouds drifting slower than the ground (cheap parallax feel).
+// Overlapping circles + a flat belly = classic cartoon cloud silhouette.
+function drawClouds() {
+  ctx.fillStyle = "rgba(200,200,200,0.65)";
+  for (let i = 0; i < 5; i++) {
+    const cxp = (W + 160) - ((i * 431 + worldX * 0.35) % (W + 240));
+    const cyp = 60 + (i * 83) % 170;
+    const r = 10 + (i % 3) * 4; // size variety between clouds
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, r, 0, Math.PI * 2);
+    ctx.arc(cxp + r * 1.1, cyp - r * 0.75, r * 1.3, 0, Math.PI * 2);
+    ctx.arc(cxp + r * 2.5, cyp - r * 0.55, r * 1.15, 0, Math.PI * 2);
+    ctx.arc(cxp + r * 3.5, cyp, r * 0.95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(cxp - r * 0.7, cyp - r * 0.15, r * 4.8, r * 1.1); // flat belly
+  }
+}
+
+/* =====================================================================
+   HOME SCREEN DECOR
+   clouds_1/2, bg_prison all share ONE 1060x618 canvas, so they
+   stack pixel-on-pixel. Draw order: clouds (opaque sky, scrolling) then the
+   prison (its sky is transparent, which is what lets the clouds show), then
+   the characters and the logo.
+   ===================================================================== */
+
+const HOME_DECOR_W = 1060, HOME_DECOR_H = 618;
+
+// The rect the decor covers on screen: matched on WIDTH and anchored on the
+// BOTTOM, so the few overflowing pixels are cut off the transparent sky at the
+// top rather than off the road at the bottom.
+function homeDecorRect() {
+  const w = W;
+  const h = w * HOME_DECOR_H / HOME_DECOR_W;
+  return { x: 0, y: H - h, w, h };
+}
+
+// Where the home characters' feet rest
+function homeGroundY() {
+  const d = homeDecorRect();
+  return d.y + d.h * HOME_GROUND_FRAC;
+}
+
+// Vertical metrics of each home sprite, as fractions of its own frame:
+//   fill   = how much of the frame height the artwork actually covers
+//   bottom = transparent padding below the artwork
+// These let us size every sprite by its CHARACTER height and land its feet on
+// the ground line, even though the frames have wildly different proportions
+// (the idle frames are 592x1113, the run frames are 915x915 squares).
+const HOME_ART = {
+  "idle":            { fill: 1.000, bottom: 0.000 },
+  "scared":          { fill: 1.000, bottom: 0.000 },
+  "koala_standing":  { fill: 0.971, bottom: 0.029 },
+  "car":             { fill: 0.547, bottom: 0.227 },
+  "player_run":        { fill: 0.966, bottom: 0.000 }, // = the home run loop
+  "koala_running":   { fill: 0.979, bottom: 0.021 }  // = the walking koala
+};
+
+// The home screen reuses in-game artwork rather than carrying its own copies:
+// the old home_run_* and home_koala_run_* files were byte-identical duplicates
+// and are gone, so these two bases point straight at the originals.
+const HOME_RUN_BASE = "player_run";
+const HOME_KOALA_BASE = "koala_running";
+const HOME_KOALA_FRAMES = 2;
+
+// The police light bar blinks off a wall clock, so it keeps flashing without
+// interruption across the home screen AND the whole intro sequence.
+function homeCarSlot() {
+  return "car_" + (Math.floor(performance.now() / 1000 * HOME_CAR_BLINK_FPS) % 2 + 1);
+}
+
+// Looks up the metrics for a slot name, stripping any trailing frame number
+function homeArt(name) {
+  return HOME_ART[name.replace(/_\d+$/, "")] || { fill: 1, bottom: 0 };
+}
+
+// Draws a home sprite so that its CHARACTER stands charH tall with its feet on
+// groundY, whatever padding its own frame carries. flip mirrors it horizontally
+// (used for the koala closing in on the player at the end of a run).
+function drawHomeSprite(name, cx, groundY, charH, flip) {
+  const img = assets[name];
+  const a = homeArt(name);
+  if (!img) {
+    // Placeholder block, same footprint as the real character would have
+    const w = charH * 0.55;
+    ctx.fillStyle = "#c03030";
+    ctx.fillRect(cx - w / 2, groundY - charH, w, charH);
+    return false;
+  }
+  const frameH = charH / a.fill;                 // the full frame, padding included
+  const frameW = frameH * (img.width / img.height);
+  const top = groundY - frameH * (1 - a.bottom); // put the ARTWORK's base on groundY
+  if (flip) {
+    ctx.save();
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);                            // mirror around the sprite's own center
+    ctx.drawImage(img, -frameW / 2, top, frameW, frameH);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, cx - frameW / 2, top, frameW, frameH);
+  }
+  return true;
+}
+
+// Picks the current frame of a numbered home loop (idle_1..4, etc.)
+function homeLoopFrame(base, count, fps, t) {
+  return base + "_" + (Math.floor(t * fps) % count + 1);
+}
+
+// The endless cloud strip: the two tiles are opaque sky and seam perfectly in
+// either order, so they alternate 1,2,1,2... and scroll as one strip.
+function drawHomeClouds() {
+  const d = homeDecorRect();
+  const period = d.w * 2;
+  const off = -(((cloudScroll % period) + period) % period);
+  let i = 0;
+  for (let x = off; x < W; x += d.w, i++) {
+    const slot = (i % 2 === 0) ? "clouds_1" : "clouds_2";
+    if (!drawSlot(slot, x, d.y, d.w, d.h)) {
+      ctx.fillStyle = "#bfe2f5"; // placeholder sky
+      ctx.fillRect(x, d.y, d.w, d.h);
+    }
+  }
+}
+
+// Clouds + prison, the static part of the home screen
+function drawHomeBackdrop() {
+  drawHomeClouds();
+  const d = homeDecorRect();
+  if (!drawSlot("bg_prison", d.x, d.y, d.w, d.h)) {
+    ctx.fillStyle = "#9a9a94"; // placeholder wall
+    ctx.fillRect(d.x, d.y + d.h * 0.25, d.w, d.h * 0.75);
+  }
+}
+
+// The FULL SEND logo: slides down from above on arrival, then bobs gently in
+// place for as long as we sit on the title screen.
+function drawHomeLogo() {
+  const slide = Math.min(1, homeTime / TITLE_SLIDE_DURATION);
+  const ease = 1 - (1 - slide) * (1 - slide);
+  // The bob fades in with the slide, so it never yanks the logo on arrival
+  const t = performance.now() / 1000;
+  const bob = Math.sin(t * HOME_LOGO_BOUNCE_SPEED) * HOME_LOGO_BOUNCE_PX * slide;
+  const cy = -HOME_LOGO_H + ease * (HOME_LOGO_Y + HOME_LOGO_H) + bob;
+  const h = HOME_LOGO_H, w = h * slotAspect("logo");
+  if (!drawSlot("logo", W / 2 - w / 2, cy - h / 2, w, h)) {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#2a2a2a";
+    ctx.font = "bold 52px monospace";
+    ctx.fillText("FULL SEND", W / 2, cy + 16);
+  }
+}
+
+// CRT "screen turns on": a bright line grows (BOOT_LINE_T), then the version
+// screen flickers to life and settles (BOOT_VERSION_T)
+function drawBoot() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+  const elapsed = (BOOT_LINE_T + BOOT_VERSION_T) - bootTimer;
+
+  if (elapsed < BOOT_LINE_T) {
+    // A thin horizontal line grows from the center of the black screen
+    const lineW = (elapsed / BOOT_LINE_T) * (W - 80);
+    ctx.fillStyle = "#e8ffe8";
+    ctx.fillRect(W / 2 - lineW / 2, H / 2 - 2, lineW, 4);
+  } else {
+    // The version screen flickers in, then holds steady
+    const p = (elapsed - BOOT_LINE_T) / BOOT_VERSION_T; // 0 -> 1
+    const flicker = p < 0.5 ? 0.3 + Math.random() * 0.7 : 1;
+    ctx.globalAlpha = flicker * Math.min(1, p * 2);
+    ctx.fillStyle = "#f7f7f7";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(42,42,42,0.85)";
+    ctx.font = "bold 22px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("DGM SYSTEM V.1", W / 2, H / 2 + 8);
+  }
+}
+
+function drawHome() {
+  drawHomeBackdrop();
+  drawHomeLogo();
+
+  // The police car is already parked when the title screen comes up, and its
+  // light bar blinks continuously — it keeps blinking right through the intro
+  // sequence and up to the moment the run actually starts.
+  drawHomeSprite(homeCarSlot(), W * HOME_CAR_FRAC, homeGroundY(), HOME_CAR_H, false);
+
+  // The red character, idle: he holds his wads of cash and glances around.
+  // idle_1..4 is a slow 4-frame loop.
+  drawHomeSprite(
+    homeLoopFrame("idle", 4, HOME_IDLE_FPS, homeTime),
+    W * HOME_CHAR_FRAC, homeGroundY(), HOME_CHAR_H, false
+  );
+
+  // Soft plate behind the menu: the prison wall is busy, the labels need it
+  const plateTop = HOME_MENU_Y[0] - 62, plateBot = HOME_MENU_Y[1] + 24;
+  ctx.fillStyle = "rgba(245,245,245,0.72)";
+  ctx.fillRect(W / 2 - 210, plateTop, 420, plateBot - plateTop);
+
+  ctx.fillStyle = "#404040";
+  ctx.font = "15px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("BEST " + String(bestScore).padStart(5, "0"), W / 2, plateTop + 26);
+
+  drawMenu(["START GAME", "LEADERBOARD"], HOME_MENU_Y, menuIndexHome, "#2a2a2a");
+
+  // Controls drawn as key caps instead of plain text
+  drawControlsHint(H - 44, false);
+}
+
+// Shared menu renderer: highlights the selected row
+function drawMenu(items, rowsY, selected, color) {
+  ctx.textAlign = "center";
+  for (let i = 0; i < items.length; i++) {
+    const isSel = i === selected;
+    ctx.font = isSel ? "bold 30px monospace" : "24px monospace";
+    ctx.fillStyle = isSel ? "#ff3020" : color;
+    ctx.fillText(items[i], W / 2, rowsY[i]); // the label itself stays perfectly centered
+    if (isSel) {
+      // selection arrow drawn separately so it doesn't shift the label
+      const tw = ctx.measureText(items[i]).width;
+      ctx.fillText(">", W / 2 - tw / 2 - 26, rowsY[i]);
+    }
+  }
+}
+
+// Draws one keyboard key cap: gray body, darker label for contrast
+function drawKeyCap(x, y, w, h, label) {
+  ctx.fillStyle = "#909090";                 // key body
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#5a5a5a";                 // pressed edge at the bottom
+  ctx.fillRect(x, y + h - 3, w, 3);
+  ctx.fillStyle = "#2e2e2e";                 // label, darker gray/black
+  ctx.font = "bold 12px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(label, x + w / 2, y + h / 2 + 4);
+}
+
+// Controls reminder drawn as key caps; compact=true is the in-game version
+function drawControlsHint(cy, compact) {
+  // Caption color: darker in game (light background) so it stays readable
+  const captionColor = compact ? "#4a4a4a" : "#909090";
+  ctx.globalAlpha = compact ? 0.85 : 1;
+  if (compact) {
+    // In game: the space bar + what it does
+    drawKeyCap(W / 2 - 130, cy, 90, 20, "SPACE");
+    ctx.fillStyle = captionColor;
+    ctx.font = "12px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("jump · HODL, you may need it later...", W / 2 - 26, cy + 14);
+  } else {
+    // Menus: arrow keys + space bar
+    drawKeyCap(W / 2 - 210, cy, 26, 22, "↑");
+    drawKeyCap(W / 2 - 180, cy, 26, 22, "↓");
+    ctx.fillStyle = captionColor;
+    ctx.font = "13px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("navigate", W / 2 - 146, cy + 15);
+    drawKeyCap(W / 2 + 10, cy, 80, 22, "SPACE");
+    // reset style after drawKeyCap so "confirm" matches "navigate" and sits
+    // to the RIGHT of the space key (not inside it)
+    ctx.fillStyle = captionColor;
+    ctx.font = "13px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("confirm", W / 2 + 100, cy + 15);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// INTRO cinematic: the character walks in with his gear, bumps the cactus,
+// loses everything (that's why the in-game runner is bare), sprints off, and
+// a black wipe brings the actual run in. Press = skip.
+// The scripted home sequence. Same page as HOME (clouds, prison, logo), only
+// the menu is gone:
+//   1. the koala cop rolls in from the right, the runner still idles
+//   2. the koala plants himself and stands there
+//   3. the runner panics (scared)
+//   4. he bolts off to the right, a black wipe closes, the run begins
+function drawIntro() {
+  const tl = introTimeline();
+  const t = introTime;
+  const groundY = homeGroundY();
+
+  drawHomeBackdrop();
+  drawHomeLogo();
+
+  // The parked police car, still blinking on the same wall clock as on the title
+  // screen, so the light bar never stutters when the sequence takes over.
+  drawHomeSprite(homeCarSlot(), W * HOME_CAR_FRAC, groundY, HOME_CAR_H, false);
+
+  // --- The koala cop: he walks RIGHT to LEFT and stops roughly facing the
+  // runner, well clear of the car. The artwork already faces left, which is his
+  // direction of travel, so it is drawn as-is — no mirroring here. ---
+  const koalaFrom = W * HOME_KOALA_START_FRAC;
+  const koalaTo = W * HOME_KOALA_STOP_FRAC;
+  let koalaX, koalaSlot;
+  if (t < tl.koalaIn) {
+    const p = t / tl.koalaIn;
+    const ease = 1 - (1 - p) * (1 - p);            // decelerating arrival
+    koalaX = koalaFrom + (koalaTo - koalaFrom) * ease;
+    koalaSlot = homeLoopFrame(HOME_KOALA_BASE, HOME_KOALA_FRAMES, HOME_KOALA_FPS, t);
+  } else {
+    // Planted in front of him, holding up his warrant
+    koalaX = koalaTo;
+    koalaSlot = "koala_standing";
+  }
+  drawHomeSprite(koalaSlot, koalaX, groundY, HOME_KOALA_H, false);
+
+  // --- The red character ---
+  const charX0 = W * HOME_CHAR_FRAC;
+  if (t < tl.koalaStop) {
+    // Still idling, unaware
+    drawHomeSprite(homeLoopFrame("idle", 4, HOME_IDLE_FPS, homeTime + t),
+                   charX0, groundY, HOME_CHAR_H, false);
+  } else if (t < tl.scared) {
+    // Frozen in panic
+    drawHomeSprite("scared", charX0, groundY, HOME_CHAR_H, false);
+  } else {
+    // Sprinting off to the right, at the SAME size he will have in game
+    const rt = t - tl.scared;
+    const x = charX0 + HOME_RUNOUT_SPEED * rt;
+    drawHomeSprite(homeLoopFrame(HOME_RUN_BASE, RUN_FRAME_COUNT, HOME_RUN_FPS, rt),
+                   x, groundY, HOME_CHAR_H, false);
+  }
+
+  ctx.fillStyle = "#404040";
+  ctx.font = "14px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("press to skip", W / 2, H - 16);
+
+  // Black wipe sliding in from the right just before the game starts
+  if (t >= tl.wipe) {
+    const p = Math.min(1, (t - tl.wipe) / HOME_WIPE_T);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(W - p * W, 0, p * W, H);
+  }
+}
+
+// Death sequence, in two beats:
+//
+//   beat 1  (0 -> DEATH_CATCH_FRAC)
+//     The runner is already in his player_hurt pose — die() switches him the
+//     instant the collision lands — and he stays frozen in it. A koala sprints
+//     in from the LEFT to catch him. The koala artwork faces left by default,
+//     but here he is running right, so THIS is where the mirror belongs.
+//
+//   beat 2  (DEATH_CATCH_FRAC -> 1)
+//     The koala reaches him: both vanish on the spot, and gameover_player_1..7
+//     plays through once while GAME OVER drops down the screen.
+//
+// The gameover frames share a 1888x1436 canvas, so they are drawn as FULL frames
+// at one fixed size: no trimming, no jitter between them.
+function drawDeathSequence() {
+  const p = 1 - deathTimer / DEATH_SEQUENCE_DURATION; // 0 -> 1
+  const elapsed = DEATH_SEQUENCE_DURATION * p;
+
+  // Light veil only
+  ctx.fillStyle = `rgba(10,5,8,${0.35 * p})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // A fall into the void leaves player.y far below the screen, so the feet line
+  // is clamped to the ground: the sequence must stay visible whatever killed us.
+  const cx = player.x + PLAYER_W / 2;
+  const feetY = Math.min(player.y + PLAYER_H, GROUND_Y);
+
+  if (p < DEATH_CATCH_FRAC) {
+    // ---- Beat 1: the runner lies there, the koala closes in from the left ----
+    const kp = p / DEATH_CATCH_FRAC;
+    const kEase = kp * (0.75 + 0.25 * kp);       // steady charge, closing a little faster
+    const koalaX = W * DEATH_KOALA_FROM + (cx - W * DEATH_KOALA_FROM) * kEase;
+    const koalaSlot = homeLoopFrame(HOME_KOALA_BASE, HOME_KOALA_FRAMES, HOME_KOALA_FPS, elapsed);
+    // Running RIGHT, against the artwork's own facing => mirrored
+    drawHomeSprite(koalaSlot, koalaX, GROUND_Y, DEATH_KOALA_H, true);
+
+    // The runner, thrown and motionless. player_hurt is centered in its
+    // square, so it hangs off the hitbox CENTER rather than off the feet.
+    const hurt = assets[playerSpritePrefix() + "_hurt"];
+    if (hurt) {
+      const h = PLAYER_SPRITE_H, w = h * (hurt.width / hurt.height);
+      ctx.drawImage(hurt, cx - w / 2, feetY - PLAYER_H / 2 - h / 2, w, h);
+    } else {
+      ctx.fillStyle = "#c03030";
+      ctx.fillRect(cx - PLAYER_W / 2, feetY - PLAYER_H, PLAYER_W, PLAYER_H);
+    }
+    return; // GAME OVER only starts dropping once he has been caught
+  }
+
+  // ---- Beat 2: both are gone, the game-over animation takes over ----
+  const tail = (p - DEATH_CATCH_FRAC) / (1 - DEATH_CATCH_FRAC); // 0 -> 1
+  const tailElapsed = elapsed - DEATH_SEQUENCE_DURATION * DEATH_CATCH_FRAC;
+
+  // Frames 1..7 play through once, then the last one holds
+  const f = Math.min(GAMEOVER_FRAME_COUNT,
+                     Math.floor(tailElapsed / GAMEOVER_BEAT_FRAME_T) + 1);
+  const dieImg = assets["gameover_player_" + f];
+  if (dieImg) {
+    // Same fixed height for every frame, anchored on the player's feet line
+    const h = PLAYER_SPRITE_H * 1.25, w = h * (dieImg.width / dieImg.height);
+    ctx.drawImage(dieImg, cx - w / 2, feetY - h, w, h);
+  } else {
+    const size = PLAYER_W * (1 + Math.sin(tail * Math.PI * 6) * 0.15);
+    ctx.save();
+    ctx.translate(cx, feetY - PLAYER_H / 2);
+    ctx.rotate(tail * Math.PI * 2);
+    ctx.fillStyle = "#2a2a2a";
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+    ctx.restore();
+  }
+
+  // GAME OVER slides from above down to the center over this second beat
+  const ease = 1 - (1 - tail) * (1 - tail); // settles gently at the end
+  const goY = -80 + ease * (H / 2 + 80);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ff3020";
+  ctx.font = "bold 92px monospace";
+  ctx.fillText("GAME OVER", W / 2, goY);
+  ctx.fillStyle = "#f0e0d0";
+  ctx.font = "17px monospace";
+  ctx.fillText("(" + deathCause + ")", W / 2, goY + 44);
+}
+
+// NOTE: currently unused — the flow now goes dying -> leaderboard directly.
+// Kept around in case we bring a game-over menu back later.
+function drawGameOverScreen() {
+  ctx.fillStyle = "rgba(10,5,8,0.85)";
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ff3020";
+  ctx.font = "bold 54px monospace";
+  ctx.fillText("demon got me", W / 2, 170);
+  ctx.fillStyle = "#f0e0d0";
+  ctx.font = "14px monospace";
+  ctx.fillText("(" + deathCause + ")", W / 2, 200);
+  ctx.font = "bold 26px monospace";
+  ctx.fillText("SCORE " + Math.floor(score), W / 2, 260);
+  ctx.font = "18px monospace";
+  ctx.fillText("BEST  " + bestScore, W / 2, 292);
+  // Menu appears once the short restart lock has passed (avoids accidental restarts)
+  if (performance.now() - gameOverTime > RESTART_LOCK * 1000) {
+    drawMenu(["RUN AGAIN", "LEADERBOARD"], GAMEOVER_MENU_Y, menuIndexGameOver, "#f0e0d0");
+  }
+}
+
+/* =====================================================================
+   LEADERBOARD (local only — placeholder names + the player's real best)
+   ===================================================================== */
+
+const DEFAULT_LEADERBOARD = [
+  { name: "D3M0N",      score: 6660 },
+  { name: "MOON",       score: 4200 },
+  { name: "DGMAX",      score: 3333 },
+  { name: "HODL3R",     score: 2500 },
+  { name: "W4GMI",      score: 1999 },
+  { name: "PEPE404",    score: 1337 },
+  { name: "RUGPULL",    score: 999 },
+  { name: "TOUCHGRASS", score: 777 },
+  { name: "C0PE",       score: 420 },
+  { name: "NGMI",       score: 69 }
+];
+
+// Merges the player's saved best score into the fake board (top 10 kept)
+function getLeaderboardRows() {
+  const rows = DEFAULT_LEADERBOARD.map(r => ({ ...r }));
+  if (bestScore > 0) rows.push({ name: "YOU", score: bestScore, you: true });
+  rows.sort((a, b) => b.score - a.score);
+  return rows.slice(0, 10);
+}
+
+function drawLeaderboard() {
+  if (!drawSlot("leaderboard_bg", 0, 0, W, H)) {
+    ctx.fillStyle = "#14090e";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ff3020";
+  ctx.font = "bold 40px monospace";
+  ctx.fillText("LEADERBOARD", W / 2, 73);
+
+  // Score of the run that just ended (the flow lands here right after a death)
+  if (score > 0) {
+    ctx.fillStyle = "#f0e0d0";
+    ctx.font = "bold 19px monospace";
+    ctx.fillText("LAST RUN  " + Math.floor(score), W / 2, 104);
+  }
+
+  // 10 rows: rank, name, score (the player's row is highlighted).
+  // Signed-in players with loaded data see the GLOBAL top 10 (@handles);
+  // everyone else keeps the offline lore board — no network dependency.
+  let rows;
+  if (sbUser && onlineTop10 && onlineTop10.length) {
+    const myHandle = sbUser.user_metadata && sbUser.user_metadata.user_name;
+    rows = onlineTop10.map(r => ({ name: "@" + r.handle, score: r.best_score, you: r.handle === myHandle }));
+  } else {
+    rows = getLeaderboardRows();
+  }
+  ctx.font = "23px monospace";
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const y = 137 + i * 41;
+    ctx.fillStyle = r.you ? "#ffd040" : "#f0e0d0";
+    ctx.textAlign = "left";
+    ctx.fillText(String(i + 1).padStart(2, " ") + ".", 264, y);
+    ctx.fillText(r.name, 330, y);
+    ctx.textAlign = "right";
+    ctx.fillText(String(r.score).padStart(6, " "), 727, y);
+  }
+
+  // Character on the right, picked from the player's rank on the board:
+  // rank 1 -> _4, rank 2 -> _3, ranks 3-4 -> _2, ranks 5-10 -> _1,
+  // not ranked -> the crying leaderboard_player (or its placeholder).
+  const youRank = rows.findIndex(r => r.you) + 1; // 0 = not on the board
+  let tierName = "leaderboard_player";
+  if (youRank === 1) tierName = "leaderboard_player_4";
+  else if (youRank === 2) tierName = "leaderboard_player_3";
+  else if (youRank === 3 || youRank === 4) tierName = "leaderboard_player_2";
+  else if (youRank >= 5) tierName = "leaderboard_player_1";
+
+  const t = performance.now() / 1000;
+  const cx = W * 0.82, cy = 355;
+  const chH = 213, chW = chH * slotAspect(tierName);
+  // Animations by tier: _1 and _3 bob up and down (like the home idle);
+  // _2 and _4 "dance" by mirroring left<->right at least every second.
+  const bobbing = tierName === "leaderboard_player_1" || tierName === "leaderboard_player_3";
+  const dancing = tierName === "leaderboard_player_2" || tierName === "leaderboard_player_4";
+  const bobOff = bobbing ? Math.sin(t * 3) * 7 : 0;
+  const flipped = dancing && Math.floor(t / 1.0) % 2 === 1;
+  ctx.save();
+  if (flipped) { // mirror the drawing around the character's center
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-cx, 0);
+  }
+  const drawn = drawSlot(tierName, cx - chW / 2, cy - chH / 2 + bobOff, chW, chH);
+  ctx.restore();
+  if (!drawn) {
+    ctx.fillStyle = "#d81f1f";
+    ctx.fillRect(cx - 30, cy - 40, 60, 80);
+    ctx.fillStyle = "#ffe040"; // eye
+    ctx.fillRect(cx + 6, cy - 24, 9, 9);
+    ctx.fillStyle = "#40a0ff"; // falling tears
+    const tearY = (t * 60) % 50;
+    ctx.fillRect(cx + 8, cy - 12 + tearY, 4, 7);
+    ctx.fillRect(cx + 8, cy - 12 + ((tearY + 25) % 50), 3, 5);
+  }
+
+  // Personal position line — and BEFORE login, the hook line that gives the
+  // JOIN button its meaning.
+  {
+    let msg = null;
+    if (sbUser) msg = onlineStatus === "loading" ? "syncing..." : rankMessage();
+    else if (db) msg = "Think you belong in the real Top 10? Log in!";
+    if (msg) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd040";
+      ctx.font = "bold 21px monospace";
+      ctx.fillText(msg, W / 2, 542);
+    }
+  }
+
+  // Buttons: JOIN GLOBAL LEADERBOARD (CTA, hidden once signed in),
+  // SHARE (discreet) and FOLLOW US ON X
+  for (const b of leaderboardButtons()) {
+    const isCta = b.id === "join";
+    ctx.fillStyle = isCta ? "#ff3020" : "rgba(255,255,255,0.08)";
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = isCta ? "#ff3020" : "#909090";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = isCta ? "#ffffff" : "#cfcfcf";
+    ctx.font = "bold 14px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 5);
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#909090";
+  ctx.font = "14px monospace";
+  ctx.fillText("press to new game", W / 2, H - 12);
+}
+
+/* =====================================================================
+   ONLINE LEADERBOARD (Supabase + X login)
+   Entirely optional: if the library failed to load or the network is down,
+   db stays null, every hook below is skipped, and the game runs exactly
+   as before (local best score + lore leaderboard).
+   ===================================================================== */
+
+const SUPABASE_URL = "https://ljofhdhkjxsqekhzyehz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqb2ZoZGhranhzcWVraHp5ZWh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTE5MjEsImV4cCI6MjEwNDE4NzkyMX0.yuOmRLLSdgsoyO_F9k1lPc8pzFN-UQnG3g663X5NV80";
+const SITE_URL = "https://demongotme.com";           // the project website (Check out our website)
+const GAME_URL = "https://gillesmc.github.io/dgm-runner/"; // link to PLAY the game (used in SHARE posts)
+const X_FOLLOW_URL = "https://x.com/lovefordemons";  // FOLLOW US ON X target
+
+let db = null; // Supabase client, or null when running offline
+try {
+  if (window.supabase) db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (e) { db = null; }
+
+let sbUser = null;         // signed-in Supabase user (null = not connected)
+let onlineTop10 = null;    // [{handle, best_score}] once loaded
+let onlineRank = null;     // my rank among ranked players
+let onlineCount = null;    // how many ranked players exist (display rules)
+let onlineStatus = "idle"; // "idle" | "loading" | "ready" | "error"
+
+/* ---- The 5 functions below are copied VERBATIM from test-login.html ---- */
+
+// Creates the player row on first login, updates the handle on later ones
+async function savePlayer(user) {
+    const { data, error } = await db
+        .from("players")
+        .upsert(
+            {
+                user_id: user.id,
+                x_id: user.user_metadata.provider_id,
+                handle: user.user_metadata.user_name
+            },
+            { onConflict: "x_id" }
+        )
+        .select();
+
+    console.log("savePlayer:", error || data);
+}
+
+// Sends a score, but only overwrites the stored best if it's higher
+async function submitScore(user, score) {
+    const { data, error } = await db
+        .from("players")
+        .update({ best_score: score })
+        .eq("user_id", user.id)
+        .lt("best_score", score)
+        .select();
+
+    console.log("submitScore:", error || data);
+}
+
+// Top 10 players by best score
+async function loadTop10() {
+    const { data, error } = await db
+        .from("players")
+        .select("handle, best_score")
+        .order("best_score", { ascending: false })
+        .limit(10);
+
+    console.log("top10:", error || data);
+    return data;
+}
+
+// Personal rank: how many players scored higher, plus one
+async function loadMyRank(score) {
+    const { count, error } = await db
+        .from("players")
+        .select("*", { count: "exact", head: true })
+        .gt("best_score", score);
+
+    console.log("rank:", error || count + 1);
+    return count + 1;
+}
+
+/* ---- End of the verbatim block ---- */
+
+// How many players have a score on the board at all (for the display rules)
+async function loadRankedCount() {
+  const { count } = await db
+    .from("players")
+    .select("*", { count: "exact", head: true })
+    .gt("best_score", 0);
+  return count || 0;
+}
+
+// Refreshes top 10 + my rank + ranked-player count (never throws)
+async function refreshOnline() {
+  if (!db || !sbUser) return;
+  onlineStatus = "loading";
+  try {
+    onlineTop10 = await loadTop10();
+    onlineRank = await loadMyRank(bestScore);
+    onlineCount = await loadRankedCount();
+    onlineStatus = "ready";
+  } catch (e) {
+    onlineStatus = "error"; // the lore board keeps being shown instead
+  }
+}
+
+// Personal position line. Rules: never show a denominator, and never show a
+// percentile above 50% (a plain rank is shown instead).
+function rankMessage() {
+  if (onlineRank == null || onlineCount == null) return null;
+  if (onlineCount < 10) return "Think you belong in the real Top 10?";
+  if (onlineCount < 50) return "RANK #" + onlineRank;
+  const pct = Math.ceil((onlineRank / onlineCount) * 100);
+  if (pct <= 50) return "TOP " + pct + "% OF RANKED PLAYERS";
+  return "RANK #" + onlineRank;
+}
+
+// Buttons shown on the leaderboard screen (geometry shared by draw & click)
+function leaderboardButtons() {
+  const y = H - 85, h = 34;
+  const btns = [
+    { id: "follow", label: "FOLLOW US ON X", x: 33, y, w: 198, h },
+    { id: "website", label: "CHECK OUT OUR WEBSITE", x: 245, y, w: 275, h }
+  ];
+  if (!sbUser && db) btns.push({ id: "join", label: "JOIN GLOBAL LEADERBOARD", x: 540, y, w: 330, h });
+  btns.push({ id: "share", label: "SHARE", x: W - 132, y, w: 99, h });
+  return btns;
+}
+
+function leaderboardButtonAction(id) {
+  if (id === "join" && db) {
+    // Exact same call as the validated test page — redirectTo must stay
+    // origin + pathname or a leftover "#" breaks the session.
+    db.auth.signInWithOAuth({
+      provider: "x",
+      options: { redirectTo: window.location.origin + window.location.pathname }
+    });
+  } else if (id === "share") {
+    // Plain text + GAME link web intent — no assets, no generated images
+    const msg = sbUser
+      ? "Demon Got Me... here is my best score on FULL SEND : " + bestScore + ". Can you do better? " + GAME_URL
+      : "Demon Got Me... can you do better than me? " + GAME_URL;
+    window.open("https://x.com/intent/post?text=" + encodeURIComponent(msg), "_blank");
+  } else if (id === "follow") {
+    window.open(X_FOLLOW_URL, "_blank");
+  } else if (id === "website") {
+    window.open(SITE_URL, "_blank");
+  }
+}
+
+// Runs once per signed-in user: ensure the player row exists, push the local
+// best (the DB keeps the higher of the two), then load the global board.
+function handleSignedIn(user) {
+  if (!user || (sbUser && sbUser.id === user.id)) return;
+  sbUser = user;
+  savePlayer(user)
+    .then(() => (bestScore > 0 ? submitScore(user, bestScore) : null))
+    .then(refreshOnline)
+    .catch(() => {});
+}
+
+// Restore an existing session on load, and catch the OAuth redirect return
+if (db) {
+  db.auth.getSession().then(({ data }) => {
+    if (data.session) handleSignedIn(data.session.user);
+  }).catch(() => {});
+  db.auth.onAuthStateChange((_event, session) => {
+    if (session) handleSignedIn(session.user);
+  });
+}
+
+/* =====================================================================
+   MAIN LOOP
+   ===================================================================== */
+
+let lastTime = performance.now();
+
+function loop(now) {
+  // Delta time in seconds, clamped so a background tab doesn't teleport the game
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (dt > 0.05) dt = 0.05;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resetRun(); // so a valid world exists before the first run starts
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
