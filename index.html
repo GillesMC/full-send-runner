@@ -154,8 +154,9 @@
         // stepped pixel curve roughly this wide (measured: the
         // left edge walks from x=311 at y=124 to x=299 at y=137)
         const SCREEN_INNER_SHADOW = 18;    // soft shadow cast inside the opening (0 = off)
-        const BOOT_LINE_T = 0.9;           // CRT "screen turns on" line effect duration (s)
-        const BOOT_VERSION_T = 1.9;        // version screen duration right after the line effect (s)
+        const LOADING_MIN_T = 1.4;         // the LOADING screen stays up at least this long (s)
+        const LOADING_MAX_T = 6.0;         // ...and stops waiting for slow images after this (s)
+        const LOADING_HOLD_T = 0.25;       // "100%" stays on screen this long before the home screen (s)
 
         // --- Home screen decor ---
         // clouds_1/2, bg_prison all share the same 1060x618 canvas.
@@ -169,6 +170,7 @@
         const HOME_LOGO_BOUNCE_PX = 8;     // how far the logo bobs up and down once it has landed (px)
         const HOME_LOGO_BOUNCE_SPEED = 2.4; // logo bob speed (radians/s)
         const HOME_CAR_BLINK_FPS = 4;      // police light bar: car_1 <-> car_2 per second
+        const HOME_MENU_FADE_T = 0.3;      // START / LEADERBOARD fade in over this, once the title screen is complete (s)
 
         // --- Home characters (all sized by CHARACTER height, never by frame height,
         //     because idle_* and scared use a taller/narrower frame than the
@@ -223,16 +225,15 @@
 
         // --- Player physics ---
         const GRAVITY = 4086;              // downward acceleration (px/s²)
-        const JUMP_VELOCITY = 1279;        // initial upward speed of a jump (px/s)
-        const DOUBLE_JUMP_VELOCITY = 1208; // upward speed of the second (air) jump (px/s)
+        const JUMP_VELOCITY = 1345;        // initial upward speed of a jump (px/s) — ~221px high
+        const DOUBLE_JUMP_VELOCITY = 1275; // upward speed of the second (air) jump (px/s) — ~199px more
         const JUMP_CUT_MULT = 0.45;        // releasing early multiplies upward speed by this (tap = short hop)
-        const HODL_FALL_SPEED = 195;       // max fall speed while the button is HELD ("HODL" glide, px/s)
         const MAX_FALL_SPEED = 1954;       // max fall speed in normal free fall (px/s)
         const COYOTE_TIME = 0.08;          // grace period to still jump right after leaving the ground (s)
         const JUMP_BUFFER_TIME = 0.10;     // pressing jump this early before landing still triggers it (s)
 
         // --- Player hitbox (NEVER changes during a run, only visuals change) ---
-        const PLAYER_X = 272;              // fixed horizontal position of the player (~24% from the left)
+        const PLAYER_X = 130;              // fixed horizontal position of the player (~12% from the left)
         const PLAYER_W = 99;               // hitbox width (px) — sized to the sprite: head AND tail are inside
         const PLAYER_H = 109;              // hitbox height (px) — matches the drawn character height
         const HITBOX_PAD = 7;              // collision forgiveness: hitbox is shrunk by this on each side (px)
@@ -254,7 +255,8 @@
         // so it is anchored on the hitbox CENTER instead of on the feet.
 
         // --- World layout ---
-        const GROUND_Y = 545;              // vertical position of the ground line (px from top of the screen window)
+        const GROUND_Y = 600;              // vertical position of the ground line (px from top of the screen window)
+        // (49px of ground left below it, half of what it used to be)
         // TODO: recalibrate once Benoit's ground art lands (his track sits lower)
 
         // --- Obstacle generation (time-based spacing => always playable at any speed) ---
@@ -315,18 +317,37 @@
             overhead: { x0: 0.00, y0: 0.00, x1: 1.00, y1: 1.00 }
         };
 
-        // --- Collectibles (2 kinds: points, hodl) ---
+        // --- Collectibles (3 kinds: points, jetpack, heart) ---
         const COLLECT_VALUE = 20;          // score gained per POINTS collectible
         const COLLECT_RADIUS = 26;         // collectible half-height (px) — the pickup box hugs the artwork
         const COLLECT_SPAWN_MIN = 1.5;     // min time between collectibles (s)
         const COLLECT_SPAWN_MAX = 3.5;     // max time between collectibles (s)
-        const COLLECT_WEIGHT_HODL = 0.30;  // chance a spawned collectible is a HODL token (the rest are points)
+        const COLLECT_WEIGHT_JETPACK = 0.30; // chance a spawned collectible is a JETPACK token (refills fuel)
+        const COLLECT_WEIGHT_HEART = 0.10;   // chance it is a heart (+1 life; points instead when hearts are full)
+        // ...the rest are points
 
-        // --- HODL meter (the glide is a resource, refilled by collectible_hodl) ---
-        const HODL_METER_MAX = 3.0;        // max seconds of glide the meter can store
-        const HODL_START = 1.5;            // glide seconds available at the start of a run
-        const HODL_REFILL = 1.0;           // glide seconds given by one HODL token
-        // Tip: set HODL_START and HODL_METER_MAX very high to get the old unlimited glide back
+        // --- Lives (hearts) ---
+        const LIVES_START = 1;             // hearts at the start of a run (1 = the next hit ends it)
+        const LIVES_MAX = 3;               // most hearts you can carry
+        const HURT_INVINCIBLE_T = 1.5;     // after losing a heart the runner blinks and can't be hit (s)
+        const VOID_BOUNCE_VELOCITY = 1650; // a heart lost in a hole throws the runner back up this fast (px/s)
+
+        // --- Jetpack (the runner's "magic power", runs on fuel refilled by collectible_jetpack) ---
+        // Holding the button once the jump has peaked (or while falling) fires it: an
+        // instant upward kick, then real thrust that beats gravity, while the runner
+        // surges forward and the world rushes past faster. It pulls you out of a hole.
+        const FUEL_MAX = 3.0;              // max seconds of thrust the tank can hold
+        const FUEL_START = 1.5;            // fuel at the start of a run (s)
+        const FUEL_REFILL = 1.0;           // fuel given by one JETPACK token (s)
+        const JET_KICK = 520;              // instant upward speed on ignition (px/s) — the "whoosh"
+        const JET_THRUST = 6200;           // upward acceleration while firing (px/s², GRAVITY is 4086)
+        const JET_MAX_RISE = 560;          // climb speed cap (px/s)
+        const JET_CEILING = 115;           // highest the jetpack lifts the player's top edge (px): just
+        // under the HUD (fuel + hearts), still above the highest pigeon
+        const JET_SPEED_BOOST = 0.45;      // world scrolls up to +45% faster while firing
+        const JET_PUSH_X = 70;             // the runner surges this far forward on screen (px)
+        const JET_SPOOL_UP = 7;            // how fast the boost kicks in (1/s)
+        const JET_SPOOL_DOWN = 2.5;        // how fast it fades after the jetpack stops (1/s)
 
         // --- HUD placement (the cabinet art slightly overlaps the window edges) ---
         const HUD_INSET_X = 76;            // horizontal distance of the HUD from the screen edges (px)
@@ -438,10 +459,10 @@
             return uaMobile || iPadOnMac || !(finePointer && canHover);
         }
 
-        function isDesktop() {
-            return true;
-        }
 
+        function isDesktop() {
+            return !isTouchOnlyDevice();
+        }
         // Re-evaluated on every resize: a desktop user who shrinks the window gets the
         // message too, and gets the game straight back when they grow it again.
         function updateDesktopGate() {
@@ -479,7 +500,7 @@
             "koala_running_1", "koala_running_2",
             "pigeon_1", "pigeon_2",
             // Collectibles
-            "collectible_points", "collectible_hodl",
+            "collectible_points", "collectible_jetpack", "collectible_heart",
             // In-game decor — NOT delivered yet, placeholder shapes are drawn instead
             "bg", "ground",
             // Death sequence
@@ -492,13 +513,15 @@
             "leaderboard_player_3", "leaderboard_player_4"
         ];
         const assets = {}; // only slots whose PNG actually loaded end up in here
+        let assetsSettled = 0; // slots that finished loading OR turned out missing (drives the LOADING bar)
 
         for (const name of ASSET_SLOTS) {
             const img = new Image();
-            img.onload = () => { assets[name] = img; };
-            img.onerror = () => { /* file missing: the fallback shape will be drawn, no error */ };
+            img.onload = () => { assets[name] = img; assetsSettled++; };
+            img.onerror = () => { assetsSettled++; /* file missing: the fallback shape will be drawn, no error */ };
             img.src = "assets/" + name + ".png";
         }
+        function allAssetsSettled() { return assetsSettled >= ASSET_SLOTS.length; }
 
         // Some source images have transparent padding around the artwork. This table
         // (opaque pixel bounds, measured from the PNGs) lets drawSlot render ONLY the
@@ -516,7 +539,7 @@
             //    pigeon_*           : animation frames share a canvas; trimming each one
             //                         separately would make them jitter frame to frame
             //  - gameover_player_*  : same, they share a 1888x1436 canvas
-            //  - collectible_hodl   : the artwork already fills its 886x1122 frame
+            //  - collectible_jetpack: the artwork already fills its 886x1122 frame
         };
 
         // Draws the slot image if it loaded (using its trim when measured).
@@ -541,11 +564,13 @@
         // Game state machine — one screen at a time:
         // "boot" -> "home" -> "intro" -> "playing" -> "dying" -> "gameover" -> "leaderboard"
         let state = "boot";
-        let bootTimer = BOOT_LINE_T + BOOT_VERSION_T; // counts down the whole boot sequence
+        let bootTime = 0;              // time spent on the LOADING screen (s)
+        let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
         let homeTime = 0;              // time spent on the home screen (drives animations)
+        let homeMenuTime = 0;          // time since START / LEADERBOARD appeared (drives their fade-in)
+        let menuIndexHome = 0;         // selected item on HOME (0 = start game, 1 = leaderboard)
         let introTime = 0;             // time elapsed in the intro cinematic (s)
         let deathTimer = 0;            // counts down the death mini-sequence
-        let menuIndexHome = 0;         // selected item on HOME (0 = start game, 1 = leaderboard)
         let menuIndexGameOver = 0;     // selected item on GAME OVER (0 = run again, 1 = leaderboard)
 
         // Best score, persisted in localStorage (wrapped in try/catch for file:// quirks)
@@ -556,14 +581,17 @@
         let player, obstacles, gaps, collectibles, particles, popups;
         let score, runTime, currentSpeed, worldX;
         let hazardTimer, collectTimer;
-        let holding = false;       // is the jump button currently held? (drives HODL glide)
+        let holding = false;       // is the jump button currently held? (drives the jetpack)
         let jumpBufferTimer = 0;   // time left on a buffered jump press
         let flashTimer = 0, flashColor = "#fff";
-        let shakeTimer = 0;
+        let shakeTimer = 0, shakePower = SHAKE_STRENGTH;
         let gameOverTime = 0;      // timestamp of death, used for the restart lock
         let deathCause = "";       // short reason shown on the game-over screen
         let squash = 1;            // visual-only vertical squash of the player (landing feedback)
-        let hodlMeter = 0;         // seconds of HODL glide left in the meter
+        let fuel = 0;              // seconds of jetpack thrust left in the tank
+        let jetPower = 0;          // 0..1, eased: how hard the jetpack boost is currently pushing
+        let lives = 0;             // hearts left (0 = the run is over)
+        let invincibleTimer = 0;   // blinking grace period right after losing a heart (s)
         let paused = false;        // "P" pauses the run (world frozen, overlay shown)
         let bootSoundPlayed = false; // soft power-on sound, once (browsers may mute it before any click)
         let bootChimeDone = false;   // fallback: play the chime on the FIRST press (audio unlocked there)
@@ -576,13 +604,14 @@
                 vy: 0,               // vertical speed (positive = falling)
                 grounded: true,
                 jumpsUsed: 0,        // 0 = fresh, 1 = jumped, 2 = double jump used
-                coyoteTimer: 0       // time since the player left the ground without jumping
+                coyoteTimer: 0,      // time since the player left the ground without jumping
+                jetting: false       // is the jetpack firing right now?
             };
             obstacles = [];        // {type:'ground'|'overhead', x, y, w, h}
             gaps = [];             // {x, w} holes in the ground
             collectibles = [];     // {x, y, r}
             particles = [];        // {x, y, vx, vy, life, color, size}
-            popups = [];           // floating texts {x, y, text, life, color, big}
+            popups = [];           // floating texts {x, y, text, life, color}
             score = 0;
             runTime = 0;
             currentSpeed = BASE_SPEED;
@@ -592,7 +621,10 @@
             collectTimer = 2.0;
             jumpBufferTimer = 0;
             squash = 1;
-            hodlMeter = HODL_START;
+            fuel = FUEL_START;
+            jetPower = 0;
+            lives = LIVES_START;
+            invincibleTimer = 0;
         }
 
         /* =====================================================================
@@ -626,21 +658,48 @@
         const sndJump = () => beep(300, 520, 0.10, "square");
         const sndDoubleJump = () => beep(420, 700, 0.10, "square");
         const sndCollect = () => beep(700, 1100, 0.09, "sine");
-        const sndHodl = () => beep(400, 800, 0.12, "triangle");
+        const sndJetpack = () => beep(400, 800, 0.12, "triangle");
+        const sndHeart = () => beep(520, 1040, 0.18, "sine");
         const sndSmash = () => beep(250, 90, 0.15, "square");
         const sndDeath = () => beep(220, 40, 0.45, "sawtooth");
         const sndBootUp = () => beep(160, 640, 0.7, "sine"); // soft, gentle power-on sweep
         const sndSiren = () => beep(700, 420, 0.35, "sine");  // the koala cop rolling in
+        const sndJetIgnite = () => beep(120, 900, 0.22, "sawtooth"); // jetpack whoosh
+        const sndJetEmpty = () => beep(220, 60, 0.25, "square");     // out of fuel sputter
+
+        // Low rumble that loops for as long as the jetpack fires
+        let jetHum = null;
+        function jetHumStart() {
+            if (!audioCtx || SOUND_VOLUME <= 0 || jetHum) return;
+            const osc = audioCtx.createOscillator();
+            const filter = audioCtx.createBiquadFilter();
+            const gain = audioCtx.createGain();
+            osc.type = "sawtooth";
+            osc.frequency.value = 70;
+            filter.type = "lowpass";
+            filter.frequency.value = 500;
+            gain.gain.value = SOUND_VOLUME * 0.9;
+            osc.connect(filter).connect(gain).connect(audioCtx.destination);
+            osc.start();
+            jetHum = { osc, gain };
+        }
+        function jetHumStop() {
+            if (!jetHum) return;
+            const t = audioCtx.currentTime;
+            jetHum.gain.gain.setTargetAtTime(0, t, 0.05);
+            jetHum.osc.stop(t + 0.3);
+            jetHum = null;
+        }
 
         /* =====================================================================
            JUICE HELPERS
            ===================================================================== */
 
         function flash(color, dur) { flashColor = color; flashTimer = dur || FLASH_DURATION; }
-        function shake() { shakeTimer = SHAKE_DURATION; }
+        function shake(power) { shakeTimer = SHAKE_DURATION; shakePower = power || SHAKE_STRENGTH; }
 
-        function addPopup(x, y, text, color, big) {
-            popups.push({ x, y, text, color, big: !!big, life: 0.8 });
+        function addPopup(x, y, text, color) {
+            popups.push({ x, y, text, color, life: 0.8 });
         }
 
         function burst(x, y, color, count, speed) {
@@ -659,11 +718,15 @@
         }
 
         /* =====================================================================
-           INPUT — one button: Space / click / tap. Press = jump, hold = HODL.
+           INPUT — one button: Space / click / tap. Press = jump, hold = JETPACK.
            ===================================================================== */
 
         // --- Screen flow helpers ---
-        function goHome() { state = "home"; homeTime = 0; menuIndexHome = 0; }
+        function goHome() { state = "home"; homeTime = 0; homeMenuTime = 0; menuIndexHome = 0; }
+        // The home screen is "complete" once the logo has landed and every image has
+        // either loaded or been ruled missing. START / LEADERBOARD only appear — and
+        // only respond — after that. Add any future title-screen animation to this check.
+        function homeReady() { return homeTime >= TITLE_SLIDE_DURATION && allAssetsSettled(); }
         function startIntro() {
             // The scripted home sequence (koala cop shows up, the runner bolts) plays
             // every time START is pressed — it IS the transition into the run.
@@ -703,24 +766,20 @@
 
         // Arrow up/down navigation inside menus
         function menuMove(dir) {
-            if (state === "home") menuIndexHome = (menuIndexHome + dir + 2) % 2;
+            if (state === "home" && homeReady()) menuIndexHome = (menuIndexHome + dir + 2) % 2;
             else if (state === "gameover") menuIndexGameOver = (menuIndexGameOver + dir + 2) % 2;
             else return;
             beep(500, 650, 0.05, "square"); // small navigation blip
         }
 
         // Menu rows vertical positions (used for drawing AND for click/tap selection)
-        const HOME_MENU_Y = [391, 452];      // vertically centered, clear of the prison decor
+        const HOME_MENU_Y = [436, 492];      // lower half of the screen, well clear of the logo
         const GAMEOVER_MENU_Y = [474, 535];
 
         // Clicking/tapping picks the menu row closest to the click before confirming
         function pickMenuFromClick(pos) {
-            if (!pos) return;
-            if (state === "home") {
-                menuIndexHome = Math.abs(pos.y - HOME_MENU_Y[0]) <= Math.abs(pos.y - HOME_MENU_Y[1]) ? 0 : 1;
-            } else if (state === "gameover") {
-                menuIndexGameOver = Math.abs(pos.y - GAMEOVER_MENU_Y[0]) <= Math.abs(pos.y - GAMEOVER_MENU_Y[1]) ? 0 : 1;
-            }
+            if (!pos || state !== "gameover") return;
+            menuIndexGameOver = Math.abs(pos.y - GAMEOVER_MENU_Y[0]) <= Math.abs(pos.y - GAMEOVER_MENU_Y[1]) ? 0 : 1;
         }
 
         // The single action button (Space / click / tap) — behavior depends on the screen
@@ -738,10 +797,11 @@
 
             switch (state) {
                 case "boot":
-                    goHome(); // pressing skips the boot effect
-                    return;
+                    return; // the LOADING screen can't be skipped: it has to finish
 
                 case "home": {
+                    // START / LEADERBOARD only respond once the whole title screen is up
+                    if (!homeReady()) return;
                     // Click/tap behavior: ANYWHERE starts a new game — except a click
                     // precisely ON the LEADERBOARD label. Keyboard: arrows + space/enter.
                     if (clickPos) {
@@ -807,15 +867,39 @@
             player.grounded = false;
             player.jumpsUsed = jumpsUsedValue;
             squash = 1.15; // slight vertical stretch on takeoff (visual only)
-            burst(player.x + PLAYER_W / 2, player.y + PLAYER_H, "#999", 6, 120);
         }
 
         function releaseButton() {
             holding = false;
+            if (state !== "playing") return;
+            cutJet(false); // letting go shuts the jetpack off instantly
             // "Jump cut": releasing while still going up shortens the jump => tap = small hop
-            if (state === "playing" && player.vy < 0) {
-                player.vy *= JUMP_CUT_MULT;
-            }
+            if (player.vy < 0) player.vy *= JUMP_CUT_MULT;
+        }
+
+        // Where the jetpack flame comes out: low on the runner's back (he faces right)
+        function jetNozzle() { return { x: player.x + 16, y: player.y + PLAYER_H * 0.62 }; }
+
+        // Jetpack ignition: this is the "magic power" moment, so it has to hit hard —
+        // an instant upward kick, a flash, a shake, a burst of fire and a whoosh.
+        function igniteJet() {
+            player.jetting = true;
+            const rescue = player.y + PLAYER_H > GROUND_Y + 6; // already sinking into a hole
+            if (player.y > JET_CEILING) player.vy = Math.min(player.vy, -JET_KICK);
+            squash = 1.2;
+            flash("#ffb030", 0.1);
+            shake(rescue ? 6 : 3);
+            const n = jetNozzle();
+            burst(n.x, n.y, "#ff9a20", 14, 320);
+            sndJetIgnite();
+            jetHumStart();
+        }
+
+        function cutJet(outOfFuel) {
+            if (!player.jetting) return;
+            player.jetting = false;
+            jetHumStop();
+            if (outOfFuel) sndJetEmpty();
         }
 
         // Keyboard: Space/Enter = action button everywhere; ArrowUp = jump in game, navigate in menus
@@ -826,10 +910,13 @@
             if (e.repeat) return; // ignore auto-repeat, we handle "hold" ourselves
             if (e.code === "KeyP") {
                 // "P" toggles pause, only during a run
-                if (state === "playing") paused = !paused;
+                if (state === "playing") {
+                    paused = !paused;
+                    if (paused) cutJet(false); // no rumble frozen under the pause
+                }
                 return;
             }
-            const inMenu = (state === "home" || state === "gameover");
+            const inMenu = (state === "home" && homeReady()) || state === "gameover";
             if (e.code === "ArrowUp" && inMenu) { menuMove(-1); return; }
             if (e.code === "ArrowDown") { if (inMenu) menuMove(1); return; }
             pressButton();
@@ -951,8 +1038,7 @@
 
         // The collectible's slot name for its kind
         function collectibleSlotName(kind) {
-            if (kind === "hodl") return "collectible_hodl";
-            return assets["collectible_points"] ? "collectible_points" : "collectible_points";
+            return "collectible_" + kind; // collectible_points / _jetpack / _heart
         }
 
         // Pickup box matching the drawn artwork (height = 2r, width follows the art)
@@ -963,9 +1049,23 @@
             return { x: c.x - w / 2, y: c.y - c.r, w, h };
         }
 
+        // RULE: nothing overlaps. These are the areas a collectible must keep clear of.
+        // A pigeon is blocked over its WHOLE flight path (it bobs or dives after
+        // spawning, so its spawn position alone is not enough); a hole is blocked
+        // from the ground line down.
+        function obstacleZone(o) {
+            const f = obstacleFrameRect(o); // the drawn frame, never smaller than the hitbox
+            if (o.type !== "overhead") return f;
+            const rise = o.motion === "diagonal" ? PIGEON_DIAGONAL_RISE : PIGEON_WAVE_AMPLITUDE;
+            const top = o.baseY + o.dy - rise;
+            return { x: f.x, y: top, w: f.w, h: f.h + rise };
+        }
+        function gapZone(g) { return { x: g.x, y: GROUND_Y - 3, w: g.w, h: H - GROUND_Y + 3 }; }
+
         function spawnHazard() {
             const spawnX = W + 40; // just off-screen to the right
             const roll = Math.random();
+            let zone; // the area the new hazard occupies (for the no-overlap rule)
 
             if (roll < 0.45) {
                 // Ground obstacle (the koala cop): jump over it. The preset height is the
@@ -973,11 +1073,13 @@
                 const variant = Math.floor(Math.random() * KOALA_SIZES.length);
                 const s = KOALA_SIZES[variant];
                 const m = obstacleFrameMetrics("ground", s.h);
-                obstacles.push({
+                const o = {
                     type: "ground", variant, animOff: Math.random() * 10,
                     x: spawnX, y: GROUND_Y - s.h, w: m.bodyW || s.w, h: s.h,
                     fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy
-                });
+                };
+                obstacles.push(o);
+                zone = obstacleZone(o);
             } else if (roll < 0.75) {
                 // Overhead obstacle (the pigeon): run under it (do NOT jump). The BODY's
                 // bottom edge always sits on the same clearance line, so it stays playable
@@ -998,19 +1100,18 @@
                 };
                 o.y = pigeonY(o);
                 obstacles.push(o);
+                zone = obstacleZone(o);
             } else {
                 // Gap in the ground: jump across
-                const w = rand(GAP_WIDTH_MIN, GAP_WIDTH_MAX);
-                gaps.push({ x: spawnX, w });
+                const g = { x: spawnX, w: rand(GAP_WIDTH_MIN, GAP_WIDTH_MAX) };
+                gaps.push(g);
+                zone = gapZone(g);
                 // A gap "occupies" time on screen: push the next hazard a bit further away
-                hazardTimer += w / currentSpeed;
+                hazardTimer += g.w / currentSpeed;
             }
 
-            // A newly spawned obstacle also evicts any collectible it would swallow
-            const lastObstacle = obstacles[obstacles.length - 1];
-            if (lastObstacle && lastObstacle.x >= spawnX - 1) {
-                collectibles = collectibles.filter(c => !overlapsWithMargin(collectibleBox(c), lastObstacle, 18));
-            }
+            // A new hazard (obstacle OR hole) evicts any collectible it would overlap
+            collectibles = collectibles.filter(c => !overlapsWithMargin(collectibleBox(c), zone, 18));
 
             // Time-based spacing: at higher speed the pixel distance grows automatically,
             // so the pattern stays physically jumpable at any speed.
@@ -1018,17 +1119,23 @@
         }
 
         function spawnCollectible() {
-            // Pick the collectible kind from the spawn weights
-            const kind = Math.random() < COLLECT_WEIGHT_HODL ? "hodl" : "points";
+            // Pick the collectible kind from the spawn weights (no heart while they are full)
+            const roll = Math.random();
+            let kind = "points";
+            if (roll < COLLECT_WEIGHT_HEART) { if (lives < LIVES_MAX) kind = "heart"; }
+            else if (roll < COLLECT_WEIGHT_HEART + COLLECT_WEIGHT_JETPACK) kind = "jetpack";
 
-            // RULE: a collectible must never sit inside (or touch) an obstacle.
-            // Try a few heights near the spawn point; give up this cycle if blocked.
+            // RULE: a collectible never overlaps (or touches) an obstacle's whole flight
+            // path, a hole, or another collectible. Try a few heights near the spawn
+            // point; give up this cycle if every one is blocked.
+            const zones = obstacles.map(obstacleZone)
+                .concat(gaps.map(gapZone))
+                .concat(collectibles.map(collectibleBox));
             for (let attempt = 0; attempt < 6; attempt++) {
                 const y = GROUND_Y - rand(41, 255); // low = grabbed running, high = needs a jump
                 const c = { x: W + 40, y, r: COLLECT_RADIUS, kind };
                 const box = collectibleBox(c);
-                const blocked = obstacles.some(o => o.x + o.w > W - 80 && overlapsWithMargin(box, o, 18));
-                if (!blocked) { collectibles.push(c); break; }
+                if (!zones.some(z => overlapsWithMargin(box, z, 18))) { collectibles.push(c); break; }
             }
             collectTimer += rand(COLLECT_SPAWN_MIN, COLLECT_SPAWN_MAX);
         }
@@ -1067,14 +1174,26 @@
            DEATH
            ===================================================================== */
 
+        // A hit costs a heart. With one to spare the run goes on: red flash, a thud and
+        // a short blinking invincibility. Returns false when it was the last heart.
+        function loseHeart() {
+            lives--;
+            if (lives <= 0) return false;
+            invincibleTimer = HURT_INVINCIBLE_T;
+            flash("#ff2020", 0.15);
+            shake(5);
+            sndSmash();
+            return true;
+        }
+
         function die(cause) {
+            cutJet(false);
             state = "dying"; // short death sequence first; the GAME OVER screen comes after
             deathTimer = DEATH_SEQUENCE_DURATION;
             deathCause = cause;
             flash("#ff2020", 0.2);
             shake();
             sndDeath();
-            burst(player.x + PLAYER_W / 2, player.y + PLAYER_H / 2, "#333", 18, 260);
             if (score > bestScore) {
                 bestScore = Math.floor(score);
                 try { localStorage.setItem("dgm_best", String(bestScore)); } catch (e) { }
@@ -1107,10 +1226,14 @@
                     ensureAudio();
                     sndBootUp();
                 }
-                bootTimer -= dt;
-                if (bootTimer <= 0) goHome();
+                // The LOADING screen waits for the images, with a floor and a ceiling on
+                // how long it stays, then holds "100%" for a beat before the home screen.
+                bootTime += dt;
+                if (loadingProgress() >= 1) bootDoneTime += dt;
+                if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) goHome();
             } else if (state === "home") {
                 homeTime += dt; // drives the logo slide-in + the idle loop
+                if (homeReady()) homeMenuTime += dt; // START / LEADERBOARD fade in
             } else if (state === "intro") {
                 const before = introTime;
                 introTime += dt;
@@ -1148,24 +1271,44 @@
             // Smooth easing so speed changes never feel like a hard snap
             currentSpeed += (targetSpeed - currentSpeed) * Math.min(1, 3 * dt);
 
-            const dx = currentSpeed * dt; // pixels traveled this frame
+            // --- Jetpack: fires while the button is held in the air, from the jump's
+            // peak onwards (so a normal jump still reaches its full height first) ---
+            const wantJet = holding && !player.grounded && fuel > 0 && (player.jetting || player.vy > 0);
+            if (wantJet && !player.jetting) igniteJet();
+            else if (!wantJet && player.jetting) cutJet(fuel <= 0);
+            // The boost spools up fast and fades gently: the runner surges forward on
+            // screen and the whole world rushes past faster
+            jetPower += ((player.jetting ? 1 : 0) - jetPower) * Math.min(1, (player.jetting ? JET_SPOOL_UP : JET_SPOOL_DOWN) * dt);
+            player.x = PLAYER_X + JET_PUSH_X * jetPower;
+
+            const dx = currentSpeed * (1 + JET_SPEED_BOOST * jetPower) * dt; // pixels traveled this frame
             worldX += dx;
             score += dx * SCORE_PER_PIXEL;
 
             // --- Player physics ---
             player.vy += GRAVITY * dt;
 
-            // HODL: while held and falling, clamp the fall to a slow controlled glide.
-            // The glide now DRAINS the hodl meter; when it's empty, normal fall resumes
-            // (refill it by grabbing collectible_hodl tokens).
-            if (holding && player.vy > 0 && hodlMeter > 0) {
-                player.vy = Math.min(player.vy, HODL_FALL_SPEED);
-                hodlMeter = Math.max(0, hodlMeter - dt);
+            if (player.jetting) {
+                // Real thrust, stronger than gravity: you climb, you don't just glide.
+                // No thrust above the ceiling (a double jump can end up there): the
+                // runner sinks back down to it first, then hovers on it.
+                if (player.y >= JET_CEILING) player.vy = Math.max(player.vy - JET_THRUST * dt, -JET_MAX_RISE);
+                fuel = Math.max(0, fuel - dt);
+                // Fire and sparks spraying out of the nozzle
+                const n = jetNozzle();
+                for (let i = 0; i < 2; i++) {
+                    particles.push({
+                        x: n.x, y: n.y, vx: -rand(150, 350), vy: rand(200, 420),
+                        life: rand(0.2, 0.45), color: Math.random() < 0.5 ? "#ffb030" : "#ff5a1a", size: rand(3, 6)
+                    });
+                }
             } else {
                 player.vy = Math.min(player.vy, MAX_FALL_SPEED);
             }
 
             player.y += player.vy * dt;
+            // The jetpack never climbs past its ceiling (jumps are not limited by it)
+            if (player.jetting && player.vy < 0 && player.y < JET_CEILING) { player.y = JET_CEILING; player.vy = 0; }
 
             const standingOnGround = !overGap();
 
@@ -1197,12 +1340,20 @@
             }
 
             if (jumpBufferTimer > 0) jumpBufferTimer -= dt;
+            if (invincibleTimer > 0) invincibleTimer -= dt;
 
             // Squash eases back to 1 (visual only, hitbox untouched)
             squash += (1 - squash) * Math.min(1, 10 * dt);
 
-            // Fell into a hole
-            if (player.y > H + 40) { die("fell into the void"); return; }
+            // Fell into a hole: a spare heart (or the blink right after losing one)
+            // throws the runner back up out of it; otherwise the run is over
+            if (player.y > H + 40) {
+                if (invincibleTimer > 0 || loseHeart()) {
+                    player.y = H;
+                    player.vy = -VOID_BOUNCE_VELOCITY;
+                    player.jumpsUsed = 1; // one air jump left to steer the landing
+                } else { die("fell into the void"); return; }
+            }
 
             // --- Spawners ---
             hazardTimer -= dt;
@@ -1229,10 +1380,10 @@
                 const o = obstacles[i];
                 // obstacleHitbox() honours HITBOX_MODE, so switching modes changes what
                 // actually kills you without touching anything that is drawn.
-                if (rectsOverlap(hb, obstacleHitbox(o))) {
-                    die(o.type === "ground" ? "caught by a koala cop" : "hit by a pigeon");
-                    return;
-                }
+                if (invincibleTimer > 0 || !rectsOverlap(hb, obstacleHitbox(o))) continue;
+                if (loseHeart()) continue; // a spare heart absorbs the hit
+                die(o.type === "ground" ? "caught by a koala cop" : "hit by a pigeon");
+                return;
             }
 
             for (let i = collectibles.length - 1; i >= 0; i--) {
@@ -1240,16 +1391,18 @@
                 const box = collectibleBox(c); // pickup box = exactly the drawn artwork
                 if (rectsOverlap(hb, box)) {
                     collectibles.splice(i, 1);
-                    if (c.kind === "hodl") {
-                        hodlMeter = Math.min(HODL_METER_MAX, hodlMeter + HODL_REFILL);
-                        addPopup(c.x, c.y - 14, "+HODL", "#30c060");
-                        sndHodl();
+                    if (c.kind === "jetpack") {
+                        fuel = Math.min(FUEL_MAX, fuel + FUEL_REFILL);
+                        sndJetpack();
+                    } else if (c.kind === "heart") {
+                        lives = Math.min(LIVES_MAX, lives + 1);
+                        addPopup(c.x, c.y - 14, "+❤️", "#ff3050");
+                        sndHeart();
                     } else {
                         score += COLLECT_VALUE;
                         addPopup(c.x, c.y - 14, "+" + COLLECT_VALUE, "#444");
                         sndCollect();
                     }
-                    burst(c.x, c.y, "#777", 8, 150);
                 }
             }
         }
@@ -1356,11 +1509,10 @@
             // --- Below: the game world (states "playing", "dying" and "gameover") ---
             ctx.save();
 
-            // Screen shake offset
-            if (shakeTimer > 0) {
-                const s = SHAKE_STRENGTH * (shakeTimer / SHAKE_DURATION);
-                ctx.translate(rand(-s, s), rand(-s, s));
-            }
+            // Screen shake offset (+ a constant rumble while the jetpack fires)
+            let s = shakeTimer > 0 ? shakePower * (shakeTimer / SHAKE_DURATION) : 0;
+            if (state === "playing" && player.jetting) s = Math.max(s, 1.6);
+            if (s > 0) ctx.translate(rand(-s, s), rand(-s, s));
 
             // --- Background (image slot first, placeholder otherwise) ---
             // NOTE: bg.png / ground.png are not delivered yet (Benoit).
@@ -1372,6 +1524,8 @@
 
             // Chrome-dino style clouds, drifting slower than the ground
             drawClouds();
+            // Jetpack boost: speed streaks rushing past, behind everything else
+            drawSpeedLines();
 
             const ink = "#2a2a2a";       // main line/obstacle color
             const voidColor = "#1c1c1c"; // color inside ground holes
@@ -1391,7 +1545,7 @@
                 ctx.fillStyle = "#b5b5b5";
                 for (let i = 0; i < 22; i++) {
                     const mx = ((i * 104) - (worldX % 104));
-                    ctx.fillRect(mx, GROUND_Y + 9 + (i % 3) * 7, 17, 2);
+                    ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2); // kept above the JUMP = SPACE hint
                 }
             }
 
@@ -1416,10 +1570,11 @@
             for (const c of collectibles) {
                 const box = collectibleBox(c);
                 if (drawSlot(collectibleSlotName(c.kind), box.x, box.y, box.w, box.h)) continue;
+                if (c.kind === "heart") { drawHeart(c.x, c.y, c.r * 2, "#ff3050"); continue; }
                 // Circle fallback, one color per kind so they stay readable
                 ctx.beginPath();
                 ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-                ctx.fillStyle = c.kind === "hodl" ? "#30c060" : "#909090";
+                ctx.fillStyle = c.kind === "jetpack" ? "#30c060" : "#909090";
                 ctx.fill();
                 ctx.beginPath(); // small inner dot for readability
                 ctx.arc(c.x, c.y, c.r * 0.4, 0, Math.PI * 2);
@@ -1428,7 +1583,12 @@
             }
 
             // --- Player (the death sequence draws its own character instead) ---
-            if (state === "playing") drawPlayer();
+            if (state === "playing") {
+                // Blinking right after losing a heart: he can't be hit during it
+                if (invincibleTimer > 0 && Math.floor(invincibleTimer * 12) % 2 === 0) ctx.globalAlpha = 0.3;
+                drawPlayer();
+                ctx.globalAlpha = 1;
+            }
 
             // Debug overlay: green boxes = the REAL collision rects of everything
             // (player, obstacles, collectibles). Obstacles also get their sprite FRAME
@@ -1449,8 +1609,8 @@
                 for (const c of collectibles) { const b = collectibleBox(c); ctx.strokeRect(b.x, b.y, b.w, b.h); }
                 ctx.fillStyle = "#00e050";
                 ctx.font = "bold 13px monospace";
-                ctx.textAlign = "left";
-                ctx.fillText("HITBOX: " + HITBOX_MODE, HUD_INSET_X, H - 52);
+                ctx.textAlign = "right"; // bottom right, in the ground strip: clear of the runner
+                ctx.fillText("HITBOX: " + HITBOX_MODE, W - HUD_INSET_X, H - 20);
             }
 
             // --- Particles ---
@@ -1465,7 +1625,7 @@
             for (const p of popups) {
                 ctx.globalAlpha = Math.max(0, p.life / 0.8);
                 ctx.fillStyle = p.color;
-                ctx.font = p.big ? "bold 64px monospace" : "bold 18px monospace";
+                ctx.font = "bold 18px monospace";
                 ctx.textAlign = "center";
                 ctx.fillText(p.text, p.x, p.y);
             }
@@ -1481,22 +1641,12 @@
             ctx.font = "18px monospace";
             ctx.fillText("HI " + String(bestScore).padStart(5, "0"), W - HUD_INSET_X, HUD_INSET_Y + 40);
 
-            // HODL meter (glide fuel), top left
-            const meterW = 178, meterH = 17, mx = HUD_INSET_X, my = HUD_INSET_Y + 7;
-            ctx.fillStyle = "rgba(0,0,0,0.25)";
-            ctx.fillRect(mx, my, meterW, meterH);
-            ctx.fillStyle = "#30c060";
-            ctx.fillRect(mx, my, meterW * (hodlMeter / HODL_METER_MAX), meterH);
-            ctx.strokeStyle = hudColor;
-            ctx.lineWidth = 2;
-            ctx.strokeRect(mx, my, meterW, meterH);
-            ctx.font = "bold 15px monospace";
-            ctx.textAlign = "left";
-            ctx.fillStyle = hudColor;
-            ctx.fillText("HODL", mx, my - 9);
+            // Jetpack fuel gauge, top left, and the hearts (lives) right under it
+            drawFuelGauge(HUD_INSET_X, HUD_INSET_Y + 7, hudColor);
+            drawLives(HUD_INSET_X, HUD_INSET_Y + 40);
 
             // Controls reminder, always visible during the run
-            if (state === "playing") drawControlsHint(H - 34, true);
+            if (state === "playing") drawControlsHint(H - 34, "#4a4a4a");
 
             ctx.restore();
 
@@ -1537,44 +1687,104 @@
             ctx.restore();
         }
 
-        // Pause: gray see-through filter + a simple text panel (no image any more)
+        // Jetpack icon: two red capsule tanks on a dark backplate, a flared nozzle under
+        // each — and little flames coming out of them while the jetpack actually fires.
+        // Drawn on a 20x20 grid, scaled up, vertically centered on the fuel cells.
+        function drawJetpackIcon(x, y, color) {
+            ctx.save();
+            ctx.translate(x, y - 4);
+            ctx.scale(1.25, 1.25);
+            ctx.fillStyle = color;
+            ctx.fillRect(6, 1, 8, 15);                       // backplate between the tanks
+            ctx.fillStyle = "#e0352b";
+            for (const tx of [0, 12]) {
+                ctx.beginPath();
+                ctx.arc(tx + 4, 3, 4, Math.PI, 0);           // rounded top
+                ctx.lineTo(tx + 8, 13);
+                ctx.arc(tx + 4, 13, 4, 0, Math.PI);          // rounded bottom
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.fillStyle = "rgba(255,255,255,0.6)";         // shine on each tank
+            for (const tx of [0, 12]) ctx.fillRect(tx + 1.5, 2, 1.5, 9);
+            ctx.fillStyle = color;                           // flared nozzles
+            for (const tx of [0, 12]) {
+                ctx.beginPath();
+                ctx.moveTo(tx + 2.5, 16);
+                ctx.lineTo(tx + 5.5, 16);
+                ctx.lineTo(tx + 7, 20);
+                ctx.lineTo(tx + 1, 20);
+                ctx.fill();
+            }
+            if (state === "playing" && player.jetting) {
+                ctx.fillStyle = "#ff9a20";
+                for (const tx of [0, 12]) {
+                    ctx.beginPath();
+                    ctx.moveTo(tx + 1, 20);
+                    ctx.lineTo(tx + 7, 20);
+                    ctx.lineTo(tx + 4, 24 + Math.random() * 4);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        // Jetpack fuel gauge: the jetpack icon, then 10 cells that fill bottom-up like
+        // a tank; the color drops green -> amber -> red, and the cells blink when low.
+        function drawFuelGauge(x, y, color) {
+            const SEG = 10, segW = 14, segGap = 3, h = 17;
+            const f = fuel / FUEL_MAX;
+            const blinkOff = f < 0.25 && Math.floor(performance.now() / 180) % 2 === 0;
+            const fillColor = f > 0.5 ? "#30c060" : f > 0.25 ? "#f0a020" : "#ff3020";
+
+            drawJetpackIcon(x, y, color);
+            const gx = x + 33;
+            for (let i = 0; i < SEG; i++) {
+                const sx = gx + i * (segW + segGap);
+                ctx.fillStyle = "rgba(0,0,0,0.15)";
+                ctx.fillRect(sx, y, segW, h);
+                const cell = Math.max(0, Math.min(1, f * SEG - i)); // how full THIS cell is
+                if (cell > 0 && !blinkOff) {
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(sx, y + h * (1 - cell), segW, h * cell);
+                }
+            }
+        }
+
+        // A heart centered on (cx, cy), size = its width
+        function drawHeart(cx, cy, size, color) {
+            const s = size / 2;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy + s * 0.9); // bottom tip
+            ctx.bezierCurveTo(cx - s * 1.2, cy + s * 0.1, cx - s * 0.9, cy - s * 0.9, cx, cy - s * 0.35);
+            ctx.bezierCurveTo(cx + s * 0.9, cy - s * 0.9, cx + s * 1.2, cy + s * 0.1, cx, cy + s * 0.9);
+            ctx.fill();
+        }
+
+        // Lives: one small heart per life left, under the fuel gauge
+        function drawLives(x, y) {
+            for (let i = 0; i < lives; i++) drawHeart(x + 9 + i * 22, y + 8, 18, "#ff3050");
+        }
+
+        // Pause: just the word, nothing else
         function drawPauseOverlay() {
-            ctx.fillStyle = "rgba(30,30,34,0.62)"; // the run stays visible behind
-            ctx.fillRect(0, 0, W, H);
-
-            const pw = 380, ph = 190;
-            const px = W / 2 - pw / 2, py = H / 2 - ph / 2;
-            ctx.fillStyle = "rgba(18,18,22,0.9)";
-            ctx.fillRect(px, py, pw, ph);
-            ctx.strokeStyle = "#f5f5f5";
-            ctx.lineWidth = 3;
-            ctx.strokeRect(px, py, pw, ph);
-
             ctx.textAlign = "center";
-            ctx.fillStyle = "#f5f5f5";
+            ctx.fillStyle = "#ffffff";
             ctx.font = "bold 52px monospace";
-            ctx.fillText("PAUSE", W / 2, py + 78);
-
-            ctx.font = "15px monospace";
-            ctx.fillStyle = "#cfcfcf";
-            ctx.fillText("SCORE " + String(Math.floor(score)).padStart(5, "0"), W / 2, py + 112);
-
-            drawKeyCap(W / 2 - 74, py + 134, 32, 24, "P");
-            ctx.fillStyle = "#cfcfcf";
-            ctx.font = "15px monospace";
-            ctx.textAlign = "left";
-            ctx.fillText("resume", W / 2 - 32, py + 151);
+            ctx.fillText("PAUSE", W / 2, H / 2 + 18);
         }
 
         function drawPlayer() {
             const px = player.x;
             const py = player.y;
 
+            drawJetFlame(); // behind the runner
+
             // --- Sprite path (visuals only — the collision hitbox NEVER changes) ---
             const img = assets[playerSpriteName()];
             if (img) {
                 drawSpriteAnchored(img, playerSpriteName());
-                drawHodlTrail(px, py);
                 return;
             }
 
@@ -1603,8 +1813,6 @@
                     ctx.fillRect(ox + drawW - 12, GROUND_Y - 5, 7, 5);
                 }
             }
-
-            drawHodlTrail(px, py);
         }
 
         // The player's sprite set. Only one set now that phase 2 is gone.
@@ -1616,8 +1824,8 @@
         function playerSpriteName() {
             const pre = playerSpritePrefix();
             if (!player.grounded) {
-                // Hold frames only show while ACTUALLY gliding (button held + meter not empty)
-                if (holding && player.vy > 0 && hodlMeter > 0) {
+                // Hold frames only show while the jetpack is ACTUALLY firing
+                if (player.jetting) {
                     const f = Math.floor(runTime * ANIM_FPS) % HOLD_FRAME_COUNT + 1;
                     return pre + "_hold_" + f;
                 }
@@ -1658,24 +1866,62 @@
             ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
         }
 
-        // HODL glide feedback: small trail lines behind the player while gliding
-        function drawHodlTrail(px, py) {
-            if (!(holding && !player.grounded && player.vy > 0 && hodlMeter > 0)) return;
-            ctx.strokeStyle = "rgba(42,42,42,0.4)";
+        // Jetpack flame: a flickering fire cone blasting down and back from the nozzle
+        function drawJetFlame() {
+            if (!player.jetting) return;
+            const n = jetNozzle();
+            const len = (48 + Math.random() * 26) * Math.min(1, jetPower * 2); // grows on ignition
+            ctx.save();
+            ctx.translate(n.x, n.y);
+            ctx.rotate(Math.PI * 0.72); // pointing down-left, behind the runner
+            const g = ctx.createLinearGradient(0, 0, len, 0);
+            g.addColorStop(0, "rgba(255,245,200,0.95)");
+            g.addColorStop(0.35, "rgba(255,170,40,0.9)");
+            g.addColorStop(1, "rgba(255,60,20,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(0, -11);
+            ctx.quadraticCurveTo(len * 0.5, -9, len, 0);
+            ctx.quadraticCurveTo(len * 0.5, 9, 0, 11);
+            ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.85)"; // white-hot core
+            ctx.beginPath();
+            ctx.moveTo(0, -5);
+            ctx.quadraticCurveTo(len * 0.25, -4, len * 0.45, 0);
+            ctx.quadraticCurveTo(len * 0.25, 4, 0, 5);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Jetpack boost: horizontal streaks rushing past faster than the world
+        function drawSpeedLines() {
+            if (state !== "playing" || jetPower < 0.05) return;
+            const span = W + 200;
+            ctx.strokeStyle = `rgba(42,42,42,${0.28 * jetPower})`;
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(px - 9, py + 7); ctx.lineTo(px - 21, py + 2);
-            ctx.moveTo(px - 9, py + 24); ctx.lineTo(px - 24, py + 21);
+            for (let i = 0; i < 14; i++) {
+                const len = (60 + (i * 37) % 90) * jetPower;
+                const x = span - ((i * 263 + worldX * 1.6) % span) - 100;
+                const y = 40 + (i * 97) % (GROUND_Y - 60);
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + len, y);
+            }
             ctx.stroke();
         }
 
         // Soft fluffy clouds drifting slower than the ground (cheap parallax feel).
         // Overlapping circles + a flat belly = classic cartoon cloud silhouette.
+        // RULE: nothing overlaps — the clouds are evenly spaced (one per slot, wider
+        // than any cloud) and kept in a sky band ABOVE the highest point a pigeon can
+        // reach (~y 186), so they never touch a bird, a collectible or each other.
+        const CLOUD_COUNT = 4;
         function drawClouds() {
             ctx.fillStyle = "rgba(200,200,200,0.65)";
-            for (let i = 0; i < 5; i++) {
-                const cxp = (W + 160) - ((i * 431 + worldX * 0.35) % (W + 240));
-                const cyp = 60 + (i * 83) % 170;
+            const span = W + 240;
+            for (let i = 0; i < CLOUD_COUNT; i++) {
+                const cxp = (W + 160) - ((i * span / CLOUD_COUNT + worldX * 0.35) % span);
+                const cyp = 60 + (i * 47) % 80;   // 60..121: cloud bottoms stay above y ~135
                 const r = 10 + (i % 3) * 4; // size variety between clouds
                 ctx.beginPath();
                 ctx.arc(cxp, cyp, r, 0, Math.PI * 2);
@@ -1822,33 +2068,56 @@
             }
         }
 
-        // CRT "screen turns on": a bright line grows (BOOT_LINE_T), then the version
-        // screen flickers to life and settles (BOOT_VERSION_T)
-        function drawBoot() {
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, W, H);
-            const elapsed = (BOOT_LINE_T + BOOT_VERSION_T) - bootTimer;
-
-            if (elapsed < BOOT_LINE_T) {
-                // A thin horizontal line grows from the center of the black screen
-                const lineW = (elapsed / BOOT_LINE_T) * (W - 80);
-                ctx.fillStyle = "#e8ffe8";
-                ctx.fillRect(W / 2 - lineW / 2, H / 2 - 2, lineW, 4);
-            } else {
-                // The version screen flickers in, then holds steady
-                const p = (elapsed - BOOT_LINE_T) / BOOT_VERSION_T; // 0 -> 1
-                const flicker = p < 0.5 ? 0.3 + Math.random() * 0.7 : 1;
-                ctx.globalAlpha = flicker * Math.min(1, p * 2);
-                ctx.fillStyle = "#f7f7f7";
-                ctx.fillRect(0, 0, W, H);
-                ctx.globalAlpha = 1;
-                ctx.fillStyle = "rgba(42,42,42,0.85)";
-                ctx.font = "bold 22px monospace";
-                ctx.textAlign = "center";
-                ctx.fillText("DGM SYSTEM V.1", W / 2, H / 2 + 8);
-            }
+        // LOADING progress, 0..1: the real image loading, but never faster than
+        // LOADING_MIN_T so the screen doesn't just blink past
+        function loadingProgress() {
+            return Math.min(1, bootTime / LOADING_MIN_T, assetsSettled / ASSET_SLOTS.length);
         }
 
+        // LOADING screen: web-blue gradient, faint grid, LOADING... / PLEASE WAIT...
+        // and a segmented progress bar following the real asset loading
+        function drawBoot() {
+            const bg = ctx.createLinearGradient(0, 0, 0, H);
+            bg.addColorStop(0, "#00008c");
+            bg.addColorStop(1, "#0000EE");
+            ctx.fillStyle = bg;
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = "rgba(255,255,255,0.07)"; // graph-paper grid
+            for (let x = 0; x < W; x += 36) ctx.fillRect(x, 0, 1, H);
+            for (let y = 0; y < H; y += 36) ctx.fillRect(0, y, W, 1);
+
+            const p = loadingProgress();
+            // Optical centering: the WORDS sit on the center line and the dots hang off
+            // to the right (centering "LOADING..." as a whole pushes the word visibly left)
+            ctx.textAlign = "left";
+            ctx.font = "bold 46px monospace";
+            ctx.fillStyle = "#ffffff";
+            const dots = ".".repeat(Math.floor(performance.now() / 350) % 4);
+            ctx.fillText("LOADING" + dots, W / 2 - ctx.measureText("LOADING").width / 2, H / 2 - 26);
+            ctx.font = "bold 22px monospace";
+            ctx.fillStyle = "#7fe3ff";
+            ctx.fillText("PLEASE WAIT...", W / 2 - ctx.measureText("PLEASE WAIT").width / 2, H / 2 + 14);
+
+            // Segmented progress bar
+            const SEG = 24, segW = 14, gap = 4, bh = 18;
+            const bw = SEG * segW + (SEG - 1) * gap;
+            const bx = W / 2 - bw / 2, by = H / 2 + 50;
+            ctx.strokeStyle = "#7fe3ff";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(bx - 6, by - 6, bw + 12, bh + 12);
+            const lit = Math.floor(p * SEG);
+            for (let i = 0; i < SEG; i++) {
+                ctx.fillStyle = i < lit ? "#39ff9e" : "rgba(127,227,255,0.15)";
+                ctx.fillRect(bx + i * (segW + gap), by, segW, bh);
+            }
+            ctx.font = "bold 14px monospace";
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#7fe3ff";
+            ctx.fillText(Math.floor(p * 100) + "%", W / 2, by + bh + 34);
+        }
+
+        // Title screen. BEST + START / LEADERBOARD only show up once everything else
+        // is in place (see homeReady), and fade in over HOME_MENU_FADE_T.
         function drawHome() {
             drawHomeBackdrop();
             drawHomeLogo();
@@ -1865,20 +2134,17 @@
                 W * HOME_CHAR_FRAC, homeGroundY(), HOME_CHAR_H, false
             );
 
-            // Soft plate behind the menu: the prison wall is busy, the labels need it
-            const plateTop = HOME_MENU_Y[0] - 62, plateBot = HOME_MENU_Y[1] + 24;
-            ctx.fillStyle = "rgba(245,245,245,0.72)";
-            ctx.fillRect(W / 2 - 210, plateTop, 420, plateBot - plateTop);
+            if (homeReady()) {
+                ctx.globalAlpha = Math.min(1, homeMenuTime / HOME_MENU_FADE_T);
+                ctx.fillStyle = "#404040";
+                ctx.font = "15px monospace";
+                ctx.textAlign = "center";
+                ctx.fillText("BEST " + String(bestScore).padStart(5, "0"), W / 2, HOME_MENU_Y[0] - 36);
+                drawMenu(["START GAME", "LEADERBOARD"], HOME_MENU_Y, menuIndexHome, "#2a2a2a");
+                ctx.globalAlpha = 1;
+            }
 
-            ctx.fillStyle = "#404040";
-            ctx.font = "15px monospace";
-            ctx.textAlign = "center";
-            ctx.fillText("BEST " + String(bestScore).padStart(5, "0"), W / 2, plateTop + 26);
-
-            drawMenu(["START GAME", "LEADERBOARD"], HOME_MENU_Y, menuIndexHome, "#2a2a2a");
-
-            // Controls drawn as key caps instead of plain text
-            drawControlsHint(H - 44, false);
+            drawControlsHint(H - 34, "#909090");
         }
 
         // Shared menu renderer: highlights the selected row
@@ -1909,34 +2175,17 @@
             ctx.fillText(label, x + w / 2, y + h / 2 + 4);
         }
 
-        // Controls reminder drawn as key caps; compact=true is the in-game version
-        function drawControlsHint(cy, compact) {
-            // Caption color: darker in game (light background) so it stays readable
-            const captionColor = compact ? "#4a4a4a" : "#909090";
-            ctx.globalAlpha = compact ? 0.85 : 1;
-            if (compact) {
-                // In game: the space bar + what it does
-                drawKeyCap(W / 2 - 130, cy, 90, 20, "SPACE");
-                ctx.fillStyle = captionColor;
-                ctx.font = "12px monospace";
-                ctx.textAlign = "left";
-                ctx.fillText("jump · HODL, you may need it later...", W / 2 - 26, cy + 14);
-            } else {
-                // Menus: arrow keys + space bar
-                drawKeyCap(W / 2 - 210, cy, 26, 22, "↑");
-                drawKeyCap(W / 2 - 180, cy, 26, 22, "↓");
-                ctx.fillStyle = captionColor;
-                ctx.font = "13px monospace";
-                ctx.textAlign = "left";
-                ctx.fillText("navigate", W / 2 - 146, cy + 15);
-                drawKeyCap(W / 2 + 10, cy, 80, 22, "SPACE");
-                // reset style after drawKeyCap so "confirm" matches "navigate" and sits
-                // to the RIGHT of the space key (not inside it)
-                ctx.fillStyle = captionColor;
-                ctx.font = "13px monospace";
-                ctx.textAlign = "left";
-                ctx.fillText("confirm", W / 2 + 100, cy + 15);
-            }
+        // Controls reminder at the very bottom (home + in game): "JUMP =" + SPACE key cap
+        function drawControlsHint(cy, captionColor) {
+            ctx.globalAlpha = 0.85;
+            ctx.font = "bold 12px monospace";
+            const label = "JUMP =", keyW = 80, gap = 8;
+            const tw = ctx.measureText(label).width;
+            const x = W / 2 - (tw + gap + keyW) / 2; // the pair is centered as one block
+            ctx.fillStyle = captionColor;
+            ctx.textAlign = "left";
+            ctx.fillText(label, x, cy + 14);
+            drawKeyCap(x + tw + gap, cy, keyW, 20, "SPACE");
             ctx.globalAlpha = 1;
         }
 
@@ -2366,15 +2615,21 @@
             return "RANK #" + onlineRank;
         }
 
-        // Buttons shown on the leaderboard screen (geometry shared by draw & click)
+        // Buttons shown on the leaderboard screen (geometry shared by draw & click).
+        // Each box is as wide as its label + the same padding, every gap is equal and
+        // the whole row is centered — with or without the JOIN button.
         function leaderboardButtons() {
-            const y = H - 85, h = 34;
+            const y = H - 85, h = 34, gap = 16, padX = 22;
             const btns = [
-                { id: "follow", label: "FOLLOW US ON X", x: 33, y, w: 198, h },
-                { id: "website", label: "CHECK OUT OUR WEBSITE", x: 245, y, w: 275, h }
+                { id: "follow", label: "FOLLOW US ON X" },
+                { id: "website", label: "CHECK OUT OUR WEBSITE" }
             ];
-            if (!sbUser && db) btns.push({ id: "join", label: "JOIN GLOBAL LEADERBOARD", x: 540, y, w: 330, h });
-            btns.push({ id: "share", label: "SHARE", x: W - 132, y, w: 99, h });
+            if (!sbUser && db) btns.push({ id: "join", label: "JOIN GLOBAL LEADERBOARD" });
+            btns.push({ id: "share", label: "SHARE" });
+            ctx.font = "bold 14px monospace"; // the font the labels are drawn with
+            for (const b of btns) b.w = Math.ceil(ctx.measureText(b.label).width) + padX * 2;
+            let x = W / 2 - (btns.reduce((sum, b) => sum + b.w, 0) + gap * (btns.length - 1)) / 2;
+            for (const b of btns) { b.x = x; b.y = y; b.h = h; x += b.w + gap; }
             return btns;
         }
 
