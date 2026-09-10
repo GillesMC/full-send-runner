@@ -66,7 +66,7 @@
 
 <!-- The canvas is the whole console (CANVAS_W x CANVAS_H, matching
      frame_cabinet.png); the game renders inside its screen window -->
-<canvas id="game" width="1440" height="880"></canvas>
+<canvas id="game" width="1920" height="1085"></canvas>
 
 <!-- Supabase client library (online leaderboard). If this fails to load,
      the game detects it and runs fully offline as before. -->
@@ -85,8 +85,8 @@
 // game is drawn ON TOP of the cabinet, clipped to that rectangle. Values below
 // were measured from the PNG (connected black component, luminance < 100):
 // x=299 y=124 w=841 h=489, ratio 1.720.
-const CANVAS_W = 1440;             // full canvas width = cabinet image width (must match the <canvas> tag)
-const CANVAS_H = 880;              // full canvas height = cabinet image height
+const CANVAS_W = 1920;             // full canvas width = cabinet image width (must match the <canvas> tag)
+const CANVAS_H = 1085;              // full canvas height = cabinet image height
 const SCREEN_X = 299;              // screen window left edge inside the cabinet art (px)
 const SCREEN_Y = 124;              // screen window top edge (px)
 const SCREEN_W = 841;              // screen window width  in CANVAS pixels
