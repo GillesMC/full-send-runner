@@ -20,17 +20,56 @@
     justify-content: center;
   }
   canvas {
-    /* Size is set from JS (fitCanvas) to fill the window while keeping the 16:9 ratio */
+    /* Size is set from JS (fitCanvas) to fill the window while keeping the 16:10 ratio */
     display: block;
     image-rendering: pixelated;
     outline: none;
   }
+
+  /* --- Desktop gate: shown instead of the game on phones, tablets and
+     windows too small to fit the console (see updateDesktopGate). --- */
+  #gate {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    box-sizing: border-box;
+    background: #0000EE; /* the same flat blue that sits behind the console */
+    color: #fff;
+    font-family: "Courier New", ui-monospace, monospace;
+    text-align: center;
+    text-transform: uppercase;
+    z-index: 10;
+  }
+  #gate[hidden] { display: none; }
+  #gate .gate-icon   { font-size: 44px; line-height: 1; }
+  #gate .gate-title  { font-size: 22px; font-weight: 700; letter-spacing: 3px; }
+  #gate .gate-line   { font-size: 15px; letter-spacing: 1px; line-height: 1.6; max-width: 30ch; }
+  #gate .gate-hint   { font-size: 11px; letter-spacing: 1px; opacity: 0.7; text-transform: none; }
+  /* Blinking cursor, because this is an arcade console after all */
+  #gate .gate-caret  { animation: gate-blink 1s steps(1) infinite; }
+  @keyframes gate-blink { 50% { opacity: 0; } }
 </style>
 </head>
 <body>
+<!-- Shown instead of the game on anything that is not a desktop/laptop -->
+<div id="gate" hidden>
+  <div class="gate-icon">🚫📱</div>
+  <div class="gate-title">Desktop only</div>
+  <div class="gate-line">
+    Not available on phone.<br>
+    Go buy yourself a PC.<span class="gate-caret">_</span>
+  </div>
+  <div class="gate-hint">Already on a computer? Make the window bigger (900 × 560 minimum).</div>
+</div>
+
 <!-- The canvas is the whole console (CANVAS_W x CANVAS_H, matching
      frame_cabinet.png); the game renders inside its screen window -->
-<canvas id="game" width="1920" height="1080"></canvas>
+<canvas id="game" width="1440" height="880"></canvas>
 
 <!-- Supabase client library (online leaderboard). If this fails to load,
      the game detects it and runs fully offline as before. -->
@@ -44,25 +83,28 @@
    ===================================================================== */
 
 // --- Screen & cabinet ---
-// The canvas matches the console art (frame_cabinet.png, 1920x1080 = pure 16:9).
-// The console's screen is an OPAQUE black rectangle, so the game is drawn ON TOP
-// of the cabinet, clipped to that rectangle. Values below were measured from the
-// PNG (connected black component): x=397 y=121 w=1124 h=649, ratio 1.732.
-const CANVAS_W = 1920;             // full canvas width = cabinet image width (must match the <canvas> tag)
-const CANVAS_H = 1080;             // full canvas height = cabinet image height
-const SCREEN_X = 397;              // screen window left edge inside the cabinet art (px)
-const SCREEN_Y = 121;              // screen window top edge (px)
-const SCREEN_W = 1124;             // screen window width  — this is the game's playfield width
-const SCREEN_H = 649;              // screen window height — this is the game's playfield height
+// The canvas matches the console art (frame_cabinet.png, 1440x880 = 16:10, the
+// laptop-shaped frame). The console's screen is an OPAQUE black rectangle, so the
+// game is drawn ON TOP of the cabinet, clipped to that rectangle. Values below
+// were measured from the PNG (connected black component, luminance < 100):
+// x=299 y=124 w=841 h=489, ratio 1.720.
+const CANVAS_W = 1440;             // full canvas width = cabinet image width (must match the <canvas> tag)
+const CANVAS_H = 880;              // full canvas height = cabinet image height
+const SCREEN_X = 299;              // screen window left edge inside the cabinet art (px)
+const SCREEN_Y = 124;              // screen window top edge (px)
+const SCREEN_W = 841;              // screen window width  in CANVAS pixels
+const SCREEN_H = 489;              // screen window height in CANVAS pixels
 const CANVAS_BG = "#0000EE";       // flat blue behind the cabinet (no background image)
 // The game sits BEHIND the console, not on top of it: the cabinet is painted
 // over the game with its screen opening punched out, so a few pixels of the
 // console's own bezel — and its rounded corners — overlap the picture. The
-// game is still rendered at full SCREEN_W x SCREEN_H; only its outer rim is
+// game is still rendered across the whole opening; only its outer rim is
 // covered, which is what makes the screen read as part of the console body.
-const SCREEN_INSET = 10;           // px of console bezel left covering the game on each side
-const SCREEN_RADIUS = 20;          // corner radius of the opening — the art's corner is a
-                                   // stepped pixel curve roughly this wide (measured)
+const SCREEN_INSET = 8;            // px of console bezel left covering the game on each side
+                                   // (CANVAS px — re-measured on the 1440x880 art)
+const SCREEN_RADIUS = 14;          // corner radius of the opening — the art's corner is a
+                                   // stepped pixel curve roughly this wide (measured: the
+                                   // left edge walks from x=311 at y=124 to x=299 at y=137)
 const SCREEN_INNER_SHADOW = 18;    // soft shadow cast inside the opening (0 = off)
 const BOOT_LINE_T = 0.9;           // CRT "screen turns on" line effect duration (s)
 const BOOT_VERSION_T = 1.9;        // version screen duration right after the line effect (s)
@@ -118,6 +160,10 @@ const GAMEOVER_BEAT_FRAME_T = 0.26;  // seconds per gameover frame (7 frames ~ 1
    All values below were scaled by SCREEN_H_RATIO = 649/548 = 1.184 when the
    playfield grew from 1021x548 to 1124x649, so the game keeps exactly the same
    proportions and difficulty as before — it is simply rendered bigger.
+   Since then the playfield has been made VIRTUAL (see PLAYFIELD_W/H): it is a
+   fixed 1116x649 that gets scaled into whatever opening the cabinet art has, so
+   swapping the art (arcade -> laptop frame) no longer touches a single value
+   here. Only change these if you actually want to change the GAME.
    --------------------------------------------------------------------- */
 
 // --- Run speed & scoring ---
@@ -251,34 +297,73 @@ const SOUND_VOLUME = 0.07;         // master volume of the little beeps (0 = mut
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-// W/H are the GAME's coordinates: every screen and all gameplay render inside
-// the console's screen window, whose size is SCREEN_W x SCREEN_H.
-const W = SCREEN_W;
-const H = SCREEN_H;
+// W/H are the GAME's coordinates. They are a VIRTUAL playfield, NOT the pixel
+// size of the console's window: the whole game is authored at 1116x649 and then
+// scaled uniformly into the SCREEN_W x SCREEN_H opening when it is drawn.
+// That indirection is what lets the cabinet art change size (1920x1080 arcade ->
+// 1440x880 laptop) without retuning a single gameplay, sprite or HUD constant —
+// every value in the block above still means exactly what it used to mean.
+// The playfield keeps the opening's aspect ratio, so nothing is ever stretched.
+const PLAYFIELD_H = 649;                                          // authoring height (unchanged since the 1124x649 era)
+const PLAYFIELD_W = Math.round(PLAYFIELD_H * SCREEN_W / SCREEN_H); // 1116 — matches the opening's 1.720 ratio
+const SCREEN_SCALE = SCREEN_H / PLAYFIELD_H;                      // 0.7535 — game px -> canvas px
+const W = PLAYFIELD_W;
+const H = PLAYFIELD_H;
 
 // --- Responsive scaling: fill the window, keep the cabinet ratio, centered.
-// On a PORTRAIT screen (phone held upright) the whole game is rotated 90° so
-// it always plays in landscape, whatever the device orientation lock says.
-let canvasRotated = false; // true when the 90° portrait rotation is active
+// The game is DESKTOP ONLY (see the gate below), so there is no portrait
+// rotation any more: a screen that cannot show the console in landscape gets
+// the "get a PC" message instead of a sideways picture.
 function fitCanvas() {
-  canvasRotated = window.innerHeight > window.innerWidth;
-  // available space for the (possibly rotated) canvas
-  const availW = canvasRotated ? window.innerHeight : window.innerWidth;
-  const availH = canvasRotated ? window.innerWidth : window.innerHeight;
-  const scale = Math.min(availW / CANVAS_W, availH / CANVAS_H);
+  const scale = Math.min(window.innerWidth / CANVAS_W, window.innerHeight / CANVAS_H);
   canvas.style.width = Math.floor(CANVAS_W * scale) + "px";
   canvas.style.height = Math.floor(CANVAS_H * scale) + "px";
-  // absolutely centered; the rotation happens around that center
   canvas.style.position = "absolute";
   canvas.style.left = "50%";
   canvas.style.top = "50%";
-  canvas.style.transform = canvasRotated
-    ? "translate(-50%, -50%) rotate(90deg)"
-    : "translate(-50%, -50%)";
+  canvas.style.transform = "translate(-50%, -50%)";
 }
 window.addEventListener("resize", fitCanvas);
 window.addEventListener("orientationchange", fitCanvas);
 fitCanvas();
+
+/* ---------------------------------------------------------------------
+   DESKTOP GATE
+   The console art is a laptop-shaped 16:10 frame built to be looked at on a
+   real computer screen. Anything else — phone, tablet, or a desktop window
+   too small to show the cabinet — gets a message instead of the game.
+   --------------------------------------------------------------------- */
+const MIN_DESKTOP_W = 900;   // narrowest window the console still reads on (CSS px)
+const MIN_DESKTOP_H = 560;   // shortest ditto
+const gate = document.getElementById("gate");
+let blocked = false;         // true while the "get a PC" screen is up
+
+// A touch-only device: no fine pointer and no hover. iPadOS lies about its UA
+// (it claims to be a Mac), so the pointer media queries are the real test and
+// the UA sniff is only a belt-and-braces second opinion.
+function isTouchOnlyDevice() {
+  const finePointer = window.matchMedia("(pointer: fine)").matches;
+  const canHover = window.matchMedia("(hover: hover)").matches;
+  const uaMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile|Silk|Kindle|BlackBerry/i.test(navigator.userAgent);
+  const iPadOnMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return uaMobile || iPadOnMac || !(finePointer && canHover);
+}
+
+function isDesktop() {
+  if (isTouchOnlyDevice()) return false;
+  return window.innerWidth >= MIN_DESKTOP_W && window.innerHeight >= MIN_DESKTOP_H;
+}
+
+// Re-evaluated on every resize: a desktop user who shrinks the window gets the
+// message too, and gets the game straight back when they grow it again.
+function updateDesktopGate() {
+  blocked = !isDesktop();
+  gate.hidden = !blocked;
+  canvas.style.visibility = blocked ? "hidden" : "visible";
+  if (blocked) releaseButton(); // never leave the jump button stuck down
+}
+window.addEventListener("resize", updateDesktopGate);
+window.addEventListener("orientationchange", updateDesktopGate);
 
 /* ---------------------------------------------------------------------
    IMAGE SLOT SYSTEM
@@ -514,22 +599,17 @@ function introTimeline() {
   return { koalaIn, koalaStop, scared, wipe, end };
 }
 
-// Converts a mouse/touch event into internal canvas coordinates (0..W, 0..H)
+// Converts a mouse/touch event into internal GAME coordinates (0..W, 0..H).
+// Three steps, mirroring draw(): CSS px -> canvas px -> minus the window's
+// origin -> divided by SCREEN_SCALE, because the game is drawn scaled into the
+// console's opening rather than at 1:1.
 function canvasPos(e) {
-  const rect = canvas.getBoundingClientRect(); // AABB (axes swapped when rotated)
+  const rect = canvas.getBoundingClientRect();
   const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
   const cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
-  if (canvasRotated) {
-    // undo the 90° clockwise rotation: screen-down = canvas-x, screen-left = canvas-y
-    return {
-      x: (cy - rect.top) * CANVAS_W / rect.height - SCREEN_X,
-      y: (rect.right - cx) * CANVAS_H / rect.width - SCREEN_Y
-    };
-  }
-  // convert to canvas pixels, then into screen-window (game) coordinates
   return {
-    x: (cx - rect.left) * CANVAS_W / rect.width - SCREEN_X,
-    y: (cy - rect.top) * CANVAS_H / rect.height - SCREEN_Y
+    x: ((cx - rect.left) * CANVAS_W / rect.width - SCREEN_X) / SCREEN_SCALE,
+    y: ((cy - rect.top) * CANVAS_H / rect.height - SCREEN_Y) / SCREEN_SCALE
   };
 }
 
@@ -652,6 +732,7 @@ function releaseButton() {
 
 // Keyboard: Space/Enter = action button everywhere; ArrowUp = jump in game, navigate in menus
 window.addEventListener("keydown", (e) => {
+  if (blocked) return; // the "get a PC" screen swallows every input
   if (!["Space", "Enter", "ArrowUp", "ArrowDown", "KeyP"].includes(e.code)) return;
   e.preventDefault();
   if (e.repeat) return; // ignore auto-repeat, we handle "hold" ourselves
@@ -671,10 +752,10 @@ window.addEventListener("keyup", (e) => {
 
 // Mouse & touch are captured on the WHOLE window: on a phone you can tap
 // anywhere on the screen to jump, not just on the console art.
-window.addEventListener("mousedown", (e) => { e.preventDefault(); pressButton(canvasPos(e)); });
+window.addEventListener("mousedown", (e) => { if (blocked) return; e.preventDefault(); pressButton(canvasPos(e)); });
 window.addEventListener("mouseup", releaseButton);
 
-window.addEventListener("touchstart", (e) => { e.preventDefault(); pressButton(canvasPos(e)); }, { passive: false });
+window.addEventListener("touchstart", (e) => { if (blocked) return; e.preventDefault(); pressButton(canvasPos(e)); }, { passive: false });
 window.addEventListener("touchend", (e) => { e.preventDefault(); releaseButton(); }, { passive: false });
 window.addEventListener("touchcancel", releaseButton);
 
@@ -1111,7 +1192,7 @@ function updatePopups(dt) {
 // Used as an even-odd hole so the cabinet can be drawn over the game.
 function screenOpeningPath() {
   const x = SCREEN_X + SCREEN_INSET, y = SCREEN_Y + SCREEN_INSET;
-  const w = W - SCREEN_INSET * 2, h = H - SCREEN_INSET * 2;
+  const w = SCREEN_W - SCREEN_INSET * 2, h = SCREEN_H - SCREEN_INSET * 2;
   const r = Math.min(SCREEN_RADIUS, w / 2, h / 2);
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y,     x + w, y + h, r);
@@ -1147,9 +1228,13 @@ function draw() {
   // Layer 2 — the GAME goes down first, so the console can be laid over it.
   // A black backing sits under it in case a screen ever leaves a gap.
   ctx.fillStyle = "#000";
-  ctx.fillRect(SCREEN_X, SCREEN_Y, W, H);
+  ctx.fillRect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H);
   ctx.save();
   ctx.translate(SCREEN_X, SCREEN_Y);
+  // From here on the context is in GAME coordinates (0..W x 0..H): the virtual
+  // playfield is squeezed into the opening, so drawScreen() never has to know
+  // how big the console art happens to be.
+  ctx.scale(SCREEN_SCALE, SCREEN_SCALE);
   ctx.beginPath();
   ctx.rect(0, 0, W, H);
   ctx.clip();
@@ -2259,12 +2344,17 @@ function loop(now) {
   lastTime = now;
   if (dt > 0.05) dt = 0.05;
 
-  update(dt);
-  draw();
+  // Blocked (phone / tablet / tiny window): the world is frozen and nothing is
+  // drawn, so coming back to a big enough window resumes exactly where it was.
+  if (!blocked) {
+    update(dt);
+    draw();
+  }
   requestAnimationFrame(loop);
 }
 
-resetRun(); // so a valid world exists before the first run starts
+resetRun();          // so a valid world exists before the first run starts
+updateDesktopGate(); // decide up front whether this device gets the game at all
 requestAnimationFrame(loop);
 </script>
 </body>
