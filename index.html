@@ -164,7 +164,7 @@
         // scroll as an endless 1,2,1,2... strip. The prison has a TRANSPARENT sky above
         // its wall, which is what lets the clouds show through behind it.
         const CLOUD_SCROLL_SPEED = 14;     // horizontal cloud drift on the home screen (px/s)
-        const HOME_LOGO_H = 210;           // display height of logo.png (px)
+        const HOME_LOGO_H = 196;           // display height of logo.png (px) — the test title's native height
         const HOME_LOGO_Y = 150;           // vertical center of the logo (px)
         const TITLE_SLIDE_DURATION = 0.6;  // how long the logo takes to slide in (s)
         const HOME_LOGO_BOUNCE_PX = 8;     // how far the logo bobs up and down once it has landed (px)
@@ -257,7 +257,60 @@
         // --- World layout ---
         const GROUND_Y = 600;              // vertical position of the ground line (px from top of the screen window)
         // (49px of ground left below it, half of what it used to be)
-        // TODO: recalibrate once Benoit's ground art lands (his track sits lower)
+
+        // --- Run backdrop (TEST art — a throwaway DA, it will be redrawn) ---
+        // Every layer was drawn 1:1 for the 649px-tall playfield, so each one is
+        // drawn at its NATIVE height and tiled / repeated along the width.
+        // Photoshop's layer export numbers from the TOP layer down, so the draw
+        // order, back to front, is: bg (sky), sun, clouds, skyline_far,
+        // skyline_near, birds, rail (the bridge), train, sidewalk, road.
+        // A layer's `par` is its parallax: the fraction of the world speed it
+        // scrolls at (1 = glued to the road the player runs on).
+        const ROAD_ABOVE_FEET = 23;        // px of road visible BEHIND the runner: 600 - 23 = 577,
+        // and 577 + 72 (road.png) lands exactly on the bottom edge
+        const SIDEWALK_H = 61;             // sidewalk.png's native height, stacked right on the road
+        const SKYLINE_FAR_PAR = 0.10;      // skyline_far, the taller city furthest back
+        const SKYLINE_NEAR_PAR = 0.18;     // skyline_near, in front of it
+        // Both skylines stand on the sidewalk's top edge, behind the bridge.
+        const RAIL_PAR = 0.5;              // the bridge: the closest scenery behind the street
+        const RAIL_SINK = 3;               // rail.png's last 2 rows are empty: 3 buries the pillars'
+        // feet one pixel behind the sidewalk
+        const RAIL_DECK_Y = 19;            // first opaque row of rail.png = the deck the train rides
+        // The train runs ON the bridge, the same way as the player. Its speed is a
+        // multiple of the run speed: 1 = it keeps pace with him (stands still on
+        // screen), above 1 it slowly overtakes him. The jetpack boost only moves the
+        // camera, not the train, so a boost lets the runner catch it back up.
+        const TRAIN_SPEED_MULT = 1.25;
+        const TRAIN_START_X = 60;          // the train's left edge on screen when a run begins (px)
+        const TRAIN_GAP = 700;             // empty track between two passes (px, on screen)
+        const TRAIN_WHEELS_Y = 137;        // bottom of the artwork inside train.png (measured)
+        const TRAIN_SINK = 4;              // px the wheels sit INTO the deck, so it rides the track
+        // Birds: they fly right to left on their own, on top of the parallax
+        const BIRDS_SPEED = 70;            // their own flying speed (px/s)
+        const BIRDS_PAR = 0.2;             // plus this fraction of the world speed
+        const BIRDS_Y_MIN = 100;           // top edge range of a pass (px): above the train,
+        const BIRDS_Y_MAX = 150;           // in front of the skylines
+        const BIRDS_GAP_MIN = 200;         // off-screen distance before the next pass (px)
+        const BIRDS_GAP_MAX = 900;
+        const BIRDS_BOB_PX = 4;            // gentle up-and-down while they fly (px)
+        // Clouds: the SAME three layers as in dgm-runner's RUN_CLOUD_LAYERS (same
+        // slots, top edge, gap, parallax and phase). Only `h` changed, to each new
+        // sprite's native height. `gap` is wider than the playfield, so at most one
+        // copy per layer is ever on screen.
+        const RUN_CLOUD_LAYERS = [
+            { slot: "cloud_run_3", h: 182, y: 10, gap: 1140, par: 0.06, phase: 900 },
+            { slot: "cloud_run_1", h: 159, y: 48, gap: 1140, par: 0.11, phase: 480 },
+            { slot: "cloud_run_2", h: 122, y: 104, gap: 1140, par: 0.18, phase: 120 }
+        ];
+        // The sun plays the old MIRADOR's part: the furthest thing after the sky,
+        // drifting the OTHER way (right, with the player) off its own boost-free
+        // odometer — at half the mirador's speed again (-0.014 / 2).
+        const SUN_PAR = -0.007;
+        const SUN_GAP = 1250;              // one sun on screen, never two
+        const SUN_START_X = 150;           // where it stands on frame one: left of cloud_run_3, which
+        // opens on x 240..647 and would hide it (clouds are drawn in front of the sun)
+        const SUN_PHASE = SUN_GAP - SUN_START_X; // parks it at SUN_START_X (see drawStrip)
+        const SUN_Y = 120;                 // top edge (px) — just under the hearts of the HUD
 
         // --- Obstacle generation (time-based spacing => always playable at any speed) ---
         const SPAWN_GAP_MIN = 0.95;        // minimum time between two hazards (s)
@@ -501,8 +554,10 @@
             "pigeon_1", "pigeon_2",
             // Collectibles
             "collectible_points", "collectible_jetpack", "collectible_heart",
-            // In-game decor — NOT delivered yet, placeholder shapes are drawn instead
-            "bg", "ground",
+            // In-game decor — TEST art, back to front (see "Run backdrop" above)
+            "bg", "sun", "cloud_run_1", "cloud_run_2", "cloud_run_3",
+            "skyline_far", "skyline_near", "birds", "rail", "train",
+            "sidewalk", "road",
             // Death sequence
             "gameover_player_1", "gameover_player_2", "gameover_player_3",
             "gameover_player_4", "gameover_player_5", "gameover_player_6",
@@ -528,7 +583,6 @@
         // artwork — so the drawn rect, and therefore the hitbox, hugs the visible
         // pixels on all four sides. Re-measure if these images are replaced.
         const SPRITE_TRIM = {
-            "collectible_points": { x: 201, y: 202, w: 622, h: 619 },
             "leaderboard_player_1": { x: 133, y: 220, w: 758, h: 639 },
             "leaderboard_player_2": { x: 99, y: 191, w: 628, h: 640 },
             "leaderboard_player_3": { x: 200, y: 216, w: 616, h: 616 },
@@ -540,6 +594,7 @@
             //                         separately would make them jitter frame to frame
             //  - gameover_player_*  : same, they share a 1888x1436 canvas
             //  - collectible_jetpack: the artwork already fills its 886x1122 frame
+            //  - collectible_points : the test Birkin already fills its 51x51 frame
         };
 
         // Draws the slot image if it loaded (using its trim when measured).
@@ -581,6 +636,7 @@
         let player, obstacles, gaps, collectibles, particles, popups;
         let score, runTime, currentSpeed, worldX;
         let hazardTimer, collectTimer;
+        let sunX, trainOdo, birds;  // backdrop odometers + the flock (see "Run backdrop")
         let holding = false;       // is the jump button currently held? (drives the jetpack)
         let jumpBufferTimer = 0;   // time left on a buffered jump press
         let flashTimer = 0, flashColor = "#fff";
@@ -616,6 +672,9 @@
             runTime = 0;
             currentSpeed = BASE_SPEED;
             worldX = 0;            // total distance traveled, used for ground marks animation
+            sunX = 0;              // the sun's own boost-free odometer
+            trainOdo = 0;          // the train's (TRAIN_SPEED_MULT x the run speed)
+            birds = { x: W * 0.6, y: rand(BIRDS_Y_MIN, BIRDS_Y_MAX) };
             paused = false;
             hazardTimer = 1.2;     // small breather before the first obstacle
             collectTimer = 2.0;
@@ -1285,6 +1344,17 @@
             worldX += dx;
             score += dx * SCORE_PER_PIXEL;
 
+            // The sun and the train ride their own odometers: the run speed ONLY, never
+            // the jetpack boost — a boost throws the street past you, not the horizon.
+            sunX += currentSpeed * dt;
+            trainOdo += currentSpeed * TRAIN_SPEED_MULT * dt;
+            // The birds cross right to left, then come back after a random gap
+            birds.x -= BIRDS_SPEED * dt + dx * BIRDS_PAR;
+            if (birds.x < -(assets["birds"] ? assets["birds"].width : 0)) {
+                birds.x = W + rand(BIRDS_GAP_MIN, BIRDS_GAP_MAX);
+                birds.y = rand(BIRDS_Y_MIN, BIRDS_Y_MAX);
+            }
+
             // --- Player physics ---
             player.vy += GRAVITY * dt;
 
@@ -1514,46 +1584,17 @@
             if (state === "playing" && player.jetting) s = Math.max(s, 1.6);
             if (s > 0) ctx.translate(rand(-s, s), rand(-s, s));
 
-            // --- Background (image slot first, placeholder otherwise) ---
-            // NOTE: bg.png / ground.png are not delivered yet (Benoit).
-            // Until they land, the flat placeholder below stands in for the biome.
-            if (!drawSlot("bg", -20, -20, W + 40, H + 40)) {
-                ctx.fillStyle = "#f7f7f7";
-                ctx.fillRect(-20, -20, W + 40, H + 40);
-            }
-
-            // Chrome-dino style clouds, drifting slower than the ground
-            drawClouds();
-            // Jetpack boost: speed streaks rushing past, behind everything else
+            // --- Backdrop: sky, sun, clouds, skylines, birds, bridge, train ---
+            drawRunBackdrop();
+            // Jetpack boost: speed streaks rushing past, behind the street
             drawSpeedLines();
+            // --- The street: the sidewalk, then the road the player runs on ---
+            drawRunGround();
 
-            const ink = "#2a2a2a";       // main line/obstacle color
-            const voidColor = "#1c1c1c"; // color inside ground holes
-
-            // --- Ground (image slot tiled & scrolling; line + marks as placeholder) ---
-            const groundImg = assets["ground"];
-            if (groundImg) {
-                const stripH = H - GROUND_Y;
-                const tileW = groundImg.width * (stripH / groundImg.height); // keep the image's aspect ratio
-                for (let gx = -(worldX % tileW) - tileW; gx < W + tileW; gx += tileW) {
-                    ctx.drawImage(groundImg, gx, GROUND_Y, tileW, stripH);
-                }
-            } else {
-                ctx.fillStyle = ink;
-                ctx.fillRect(-20, GROUND_Y, W + 40, 3);
-                // Small marks scrolling on the ground to sell the speed (dino style)
-                ctx.fillStyle = "#b5b5b5";
-                for (let i = 0; i < 22; i++) {
-                    const mx = ((i * 104) - (worldX % 104));
-                    ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2); // kept above the JUMP = SPACE hint
-                }
-            }
-
-            // --- Holes cut into the ground (drawn over the ground, image or not) ---
-            for (const g of gaps) {
-                ctx.fillStyle = voidColor;
-                ctx.fillRect(g.x, GROUND_Y - 3, g.w, H - GROUND_Y + 3);
-            }
+            // --- Holes cut into the road (drawn over it, image or not) ---
+            const holeTop = assets["road"] ? runLayout().roadTop : GROUND_Y - 3;
+            ctx.fillStyle = "#1c1c1c";
+            for (const g of gaps) ctx.fillRect(g.x, holeTop, g.w, H - holeTop);
 
             // --- Obstacles: the animated koala / pigeon, drawn as FULL frames.
             // The frames share a canvas, so drawing them untrimmed is what keeps the
@@ -1646,7 +1687,7 @@
             drawLives(HUD_INSET_X, HUD_INSET_Y + 40);
 
             // Controls reminder, always visible during the run
-            if (state === "playing") drawControlsHint(H - 34, "#4a4a4a");
+            if (state === "playing") drawControlsHint(H - 34, "#f0f0f0"); // light: it sits on the road
 
             ctx.restore();
 
@@ -1832,8 +1873,16 @@
                 if (player.jumpsUsed >= 2) return pre + "_doublejump"; // after the 2nd jump
                 return pre + "_jump";                                  // first jump / simple fall
             }
-            const f = Math.floor(runTime * ANIM_FPS) % RUN_FRAME_COUNT + 1;
+            const f = Math.floor(runTime * ANIM_FPS) % runFrameCount() + 1;
             return pre + "_run_" + f; // running on the ground
+        }
+
+        // Run frames actually delivered. A loop with fewer frames than RUN_FRAME_COUNT
+        // (the test art has ONE) simply cycles over what exists; none = placeholder.
+        function runFrameCount() {
+            let n = 0;
+            while (n < RUN_FRAME_COUNT && assets["player_run_" + (n + 1)]) n++;
+            return n || RUN_FRAME_COUNT;
         }
 
         // Draws a player sprite. Every frame shares ONE 915x915 square with the artwork
@@ -1846,8 +1895,12 @@
         // so it is anchored on the hitbox's CENTER instead of on its feet line.
         function drawSpriteAnchored(img, name) {
             // squash is the takeoff/landing juice — visual only, hitbox untouched
-            const h = PLAYER_SPRITE_H * squash;
-            const w = PLAYER_SPRITE_H * (img.width / img.height) * (2 - squash);
+            // A 915x915 square carries padding (the character fills 96.6% of it); a
+            // non-square frame is the character alone, trimmed, so it is drawn at the
+            // character's own height instead — both come out the same size.
+            const baseH = img.width === img.height ? PLAYER_SPRITE_H : PLAYER_CHAR_H;
+            const h = baseH * squash;
+            const w = baseH * (img.width / img.height) * (2 - squash);
             const anchorX = player.x + PLAYER_W / 2; // horizontal center of the hitbox
             if (name && name.endsWith("_hurt")) {
                 const anchorY = player.y + PLAYER_H / 2; // CENTER anchor: he is airborne
@@ -1910,6 +1963,7 @@
             ctx.stroke();
         }
 
+        // FALLBACK only, while no cloud_run_* PNG is in assets/ (see RUN_CLOUD_LAYERS).
         // Soft fluffy clouds drifting slower than the ground (cheap parallax feel).
         // Overlapping circles + a flat belly = classic cartoon cloud silhouette.
         // RULE: nothing overlaps — the clouds are evenly spaced (one per slot, wider
@@ -1930,6 +1984,136 @@
                 ctx.arc(cxp + r * 3.5, cyp, r * 0.95, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.fillRect(cxp - r * 0.7, cyp - r * 0.15, r * 4.8, r * 1.1); // flat belly
+            }
+        }
+
+        /* =====================================================================
+           RUN BACKDROP (test art)
+           Everything that scrolls is one of two shapes: a single sprite repeated
+           along an endless strip (drawStrip: clouds, sun), or a texture tiled
+           edge to edge (drawTiled: skylines, bridge, sidewalk, road). The
+           parallax is just the offset handed to them.
+           ===================================================================== */
+
+        function nativeH(slot) { return assets[slot] ? assets[slot].height : 0; }
+
+        // Vertical layout of the street, all derived from GROUND_Y (the feet):
+        //   roadTop      road.png, ROAD_ABOVE_FEET above the feet, down to the bottom
+        //   sidewalkTop  sidewalk.png, stacked right on top of the road
+        //   railTop      the bridge, its pillars standing on the sidewalk
+        //   deckTop      the bridge deck, where the train's wheels go
+        function runLayout() {
+            const roadTop = GROUND_Y - ROAD_ABOVE_FEET;
+            const sidewalkTop = roadTop - SIDEWALK_H;
+            const railTop = sidewalkTop + RAIL_SINK - nativeH("rail");
+            return { roadTop, sidewalkTop, railTop, deckTop: railTop + RAIL_DECK_Y };
+        }
+
+        // Repeats ONE sprite along an endless horizontal strip.
+        //   offset how far the strip has travelled, in px (any sign, any size)
+        //   h      on-screen height; the width follows the artwork
+        //   y      top edge
+        //   gap    empty space left between two copies
+        // Returns false when the image never loaded (nothing is drawn).
+        function drawStrip(slot, offset, h, y, gap) {
+            if (!assets[slot]) return false;
+            const w = h * slotAspect(slot);
+            const period = w + gap;
+            // Modulo that stays negative-safe, so the strip never jumps at offset 0
+            const start = -(((offset % period) + period) % period) - w;
+            for (let x = start; x < W + w; x += period) drawSlot(slot, x, y, w, h);
+            return true;
+        }
+
+        // Tiles a texture edge to edge (no gap), its width derived from the height it
+        // is drawn at, so nothing is stretched. Each tile is snapped to whole pixels
+        // and stretched ONE pixel under its neighbour: antialiased fractional edges
+        // would otherwise leave a hairline of whatever is behind at every seam.
+        function drawTiled(slot, offset, y, h) {
+            if (!assets[slot]) return false;
+            const w = h * slotAspect(slot);
+            const start = -(((offset % w) + w) % w);
+            for (let x = start - w; x < W + w; x += w) {
+                const x0 = Math.round(x), x1 = Math.round(x + w);
+                drawSlot(slot, x0, y, x1 - x0 + 1, h);
+            }
+            return true;
+        }
+
+        // The cloud layers, each moving at its own speed — that difference is what
+        // reads as depth. Returns false when not a single cloud image loaded.
+        function drawCloudLayers(layers, offsets) {
+            let drawn = false;
+            for (let i = 0; i < layers.length; i++) {
+                const L = layers[i];
+                if (drawStrip(L.slot, offsets[i] + (L.phase || 0), L.h, L.y, L.gap)) drawn = true;
+            }
+            return drawn;
+        }
+
+        // The flock, crossing right to left (its position is moved in update())
+        function drawBirds() {
+            const img = assets["birds"];
+            if (!img) return;
+            const bob = Math.sin(runTime * 3) * BIRDS_BOB_PX;
+            ctx.drawImage(img, birds.x, birds.y + bob, img.width, img.height);
+        }
+
+        // The train, riding the bridge deck. Its screen position is how far it has
+        // pulled ahead of the camera, at the bridge's parallax, wrapped around a loop
+        // of [off-screen left + TRAIN_GAP .. right edge] — so it leaves on the right,
+        // and comes back in from the left (or the other way round under a boost).
+        function drawTrain(deckTop) {
+            const img = assets["train"];
+            if (!img) return;
+            const lo = -img.width - TRAIN_GAP;
+            const period = W - lo;
+            const ahead = TRAIN_START_X + (trainOdo - worldX) * RAIL_PAR;
+            const x = lo + ((((ahead - lo) % period) + period) % period);
+            ctx.drawImage(img, x, deckTop + TRAIN_SINK - TRAIN_WHEELS_Y, img.width, img.height);
+        }
+
+        // Everything behind the street, back to front
+        function drawRunBackdrop() {
+            const L = runLayout();
+
+            // Sky: the gradient, oversized so a screen shake never uncovers an edge
+            if (!drawSlot("bg", -20, -20, W + 40, H + 40)) {
+                ctx.fillStyle = "#f7f7f7";
+                ctx.fillRect(-20, -20, W + 40, H + 40);
+            }
+
+            // The sun, in the mirador's old part: SUN_PAR is negative, so this offset
+            // counts DOWN and it drifts right — with the player — barely moving
+            drawStrip("sun", sunX * SUN_PAR + SUN_PHASE, nativeH("sun"), SUN_Y, SUN_GAP);
+
+            // Clouds, three layers, each on its own fraction of the world speed
+            if (!drawCloudLayers(RUN_CLOUD_LAYERS, RUN_CLOUD_LAYERS.map(c => worldX * c.par))) drawClouds();
+
+            // The two skylines, feet on the sidewalk's top edge, behind the bridge
+            const farH = nativeH("skyline_far"), nearH = nativeH("skyline_near");
+            drawTiled("skyline_far", worldX * SKYLINE_FAR_PAR, L.sidewalkTop - farH, farH);
+            drawTiled("skyline_near", worldX * SKYLINE_NEAR_PAR, L.sidewalkTop - nearH, nearH);
+
+            drawBirds();
+            drawTiled("rail", worldX * RAIL_PAR, L.railTop, nativeH("rail"));
+            drawTrain(L.deckTop);
+        }
+
+        // The street: the sidewalk (scenery, above the ground line), then the road
+        // the player actually runs on — it starts a little above his feet, which is
+        // what puts him ON the road rather than in front of it.
+        function drawRunGround() {
+            const L = runLayout();
+            drawTiled("sidewalk", worldX, L.sidewalkTop, SIDEWALK_H);
+            if (drawTiled("road", worldX, L.roadTop, H - L.roadTop)) return;
+            // Placeholder: the old dino-style line plus scrolling speed marks
+            ctx.fillStyle = "#2a2a2a";
+            ctx.fillRect(-20, GROUND_Y, W + 40, 3);
+            ctx.fillStyle = "#b5b5b5";
+            for (let i = 0; i < 22; i++) {
+                const mx = ((i * 104) - (worldX % 104));
+                ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2); // kept above the JUMP = SPACE hint
             }
         }
 
@@ -2241,7 +2425,7 @@
                 // Sprinting off to the right, at the SAME size he will have in game
                 const rt = t - tl.scared;
                 const x = charX0 + HOME_RUNOUT_SPEED * rt;
-                drawHomeSprite(homeLoopFrame(HOME_RUN_BASE, RUN_FRAME_COUNT, HOME_RUN_FPS, rt),
+                drawHomeSprite(homeLoopFrame(HOME_RUN_BASE, runFrameCount(), HOME_RUN_FPS, rt),
                     x, groundY, HOME_CHAR_H, false);
             }
 
