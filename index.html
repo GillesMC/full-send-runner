@@ -6,12 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>DGM — Demon Got Me (prototype)</title>
     <style>
-        /* Minimal page styling: dark page, centered canvas, no scrollbars */
+        /* Black page, canvas centered: whatever the window's shape, the space the
+           16:9 game doesn't fill shows as black bars */
         html,
         body {
             margin: 0;
             padding: 0;
-            background: #0000EE;
+            background: #000;
             height: 100%;
             overflow: hidden;
             touch-action: none;
@@ -25,24 +26,14 @@
         }
 
         canvas {
-            /* Size is set from JS (fitCanvas) to fill the window while keeping the 16:10 ratio */
+            /* Size is set from JS (fitCanvas): as big as the window allows, 16:9 kept */
             display: block;
             image-rendering: pixelated;
             outline: none;
         }
 
-        #gameViewport {
-            position: fixed;
-            inset: 0;
-            overflow: hidden;
-        }
-
-        #game {
-            position: absolute;
-        }
-
-        /* --- Desktop gate: shown instead of the game on phones, tablets and
-     windows too small to fit the console (see updateDesktopGate). --- */
+        /* --- Desktop gate: shown instead of the game on phones and tablets
+     (see updateDesktopGate). --- */
         #gate {
             position: fixed;
             inset: 0;
@@ -53,8 +44,7 @@
             gap: 18px;
             padding: 24px;
             box-sizing: border-box;
-            background: #0000EE;
-            /* the same flat blue that sits behind the console */
+            background: #000;
             color: #fff;
             font-family: "Courier New", ui-monospace, monospace;
             text-align: center;
@@ -113,11 +103,8 @@
         </div>
     </div>
 
-    <!-- The canvas is the whole console (CANVAS_W x CANVAS_H, matching
-     frame_cabinet.png); the game renders inside its screen window -->
-    <div id="gameViewport">
-        <canvas id="game" width="1440" height="880"></canvas>
-    </div>
+    <!-- The game screen: 1280x720, the art is drawn on it 1:1 -->
+    <canvas id="game" width="1280" height="720"></canvas>
 
     <!-- Supabase client library (online leaderboard). If this fails to load,
      the game detects it and runs fully offline as before. -->
@@ -130,69 +117,92 @@
            All speeds are in pixels/second, all durations in seconds.
            ===================================================================== */
 
-        // --- Screen & cabinet ---
-        // The canvas matches the console art (frame_cabinet.png, 1440x880 = 16:10, the
-        // laptop-shaped frame). The console's screen is an OPAQUE black rectangle, so the
-        // game is drawn ON TOP of the cabinet, clipped to that rectangle. Values below
-        // were measured from the PNG (connected black component, luminance < 100):
-        // x=299 y=124 w=841 h=489, ratio 1.720.
-        const CANVAS_W = 1440;             // full canvas width = cabinet image width (must match the <canvas> tag)
-        const CANVAS_H = 880;              // full canvas height = cabinet image height
-        const SCREEN_X = 299;              // screen window left edge inside the cabinet art (px)
-        const SCREEN_Y = 124;              // screen window top edge (px)
-        const SCREEN_W = 841;              // screen window width  in CANVAS pixels
-        const SCREEN_H = 489;              // screen window height in CANVAS pixels
-        const CANVAS_BG = "#0000EE";       // flat blue behind the cabinet (no background image)
-        // The game sits BEHIND the console, not on top of it: the cabinet is painted
-        // over the game with its screen opening punched out, so a few pixels of the
-        // console's own bezel — and its rounded corners — overlap the picture. The
-        // game is still rendered across the whole opening; only its outer rim is
-        // covered, which is what makes the screen read as part of the console body.
-        const SCREEN_INSET = 8;            // px of console bezel left covering the game on each side
-        // (CANVAS px — re-measured on the 1440x880 art)
-        const SCREEN_RADIUS = 14;          // corner radius of the opening — the art's corner is a
-        // stepped pixel curve roughly this wide (measured: the
-        // left edge walks from x=311 at y=124 to x=299 at y=137)
-        const SCREEN_INNER_SHADOW = 18;    // soft shadow cast inside the opening (0 = off)
+        // --- Screen ---
+        // The game screen is 1280x720 (16:9). The canvas IS the screen: the art is
+        // drawn on it 1:1, and fitCanvas() scales the whole thing to the window, with
+        // black bars on whichever sides are left over.
+        const W = 1280;                    // must match the <canvas> tag
+        const H = 720;
         const LOADING_MIN_T = 1.4;         // the LOADING screen stays up at least this long (s)
         const LOADING_MAX_T = 6.0;         // ...and stops waiting for slow images after this (s)
         const LOADING_HOLD_T = 0.25;       // "100%" stays on screen this long before the home screen (s)
 
-        // --- Home screen decor ---
-        // clouds_1/2, bg_prison all share the same 1060x618 canvas.
-        // The two cloud tiles are opaque sky and seam perfectly in any order, so they
-        // scroll as an endless 1,2,1,2... strip. The prison has a TRANSPARENT sky above
-        // its wall, which is what lets the clouds show through behind it.
-        const CLOUD_SCROLL_SPEED = 14;     // horizontal cloud drift on the home screen (px/s)
-        const HOME_LOGO_H = 196;           // display height of logo.png (px) — the test title's native height
-        const HOME_LOGO_Y = 150;           // vertical center of the logo (px)
+        // --- Title screen: the forest ---
+        // Every home_* image is pixel art drawn 1:1 on the 1280x720 screen, at its
+        // native size — never scaled. Photoshop's layer export trims each file to its
+        // own pixels, so each one gets back the top-left corner it had in the PSD:
+        // measured pixel by pixel against home_forest for rocks / ground / waterfall,
+        // read off the demo render for the clouds. Listed back to front.
+        const HOME_BACK_LAYERS = [
+            { slot: "home_sky", x: 0, y: 0 },
+            { slot: "home_cloud_4", x: 20, y: 150 },
+            { slot: "home_cloud_3", x: 190, y: 140 },
+            { slot: "home_cloud_2", x: 400, y: 165 },
+            { slot: "home_cloud_1", x: 127, y: 0 },
+            { slot: "home_mountains", x: 0, y: 0 },
+            { slot: "home_forest", x: 0, y: 0 }       // trees, pagoda, bridge, pond
+        ];
+        // The waterfall's frame 1 is the one painted in home_forest; frames 2 and 3
+        // are drawn over it, so the loop is forest / 2 / 3.
+        const HOME_WATERFALL = { x: 1103, y: 258, fps: 6, frames: [null, "home_waterfall_2", "home_waterfall_3"] };
+        const HOME_FRONT_LAYERS = [
+            { slot: "home_rocks", x: 1, y: 373 },
+            { slot: "home_ground", x: 0, y: 530 }     // the grass ledge (running line) + the water
+        ];
+        // The samurai and his katana sit ON the running line (GROUND_Y): only x is set here
+        const HOME_SAMURAI_X = 208;        // left edge (px)
+        const HOME_KATANA_X = 383;         // left edge (px)
+        // He meditates, barely moving: on every out-breath his head and shoulders sink
+        // one pixel (the rows above HOME_BREATH_SPLIT slide down over the row below).
+        const HOME_BREATH_PX = 1;          // 0 = perfectly still
+        const HOME_BREATH_SPLIT = 120;     // first row of home_samurai that never moves (hakama)
+        const HOME_BREATH_PERIOD = 4.5;    // one full breath (s)
+        // Falling leaves: home_leaf drifting down and swaying, mirrored each time the
+        // sway turns back (pixel-perfect flip, no rotation). They start where the
+        // demo render has them, then respawn above the screen at a random x.
+        const HOME_LEAF_START = [          // leaf centers on the first frame (px)
+            [233, 210], [128, 348], [150, 465], [500, 333], [612, 187],
+            [632, 382], [503, 478], [1218, 415], [978, 600]
+        ];
+        const HOME_LEAF_FALL = [20, 36];   // fall speed range (px/s)
+        const HOME_LEAF_SWAY = [14, 34];   // sway amplitude range (px)
+        const HOME_LEAF_SWAY_SPEED = [0.8, 1.4]; // sway speed range (radians/s)
+        // Koi: two swim slowly back and forth in open water (clear of the stones),
+        // the third one leaps out now and then. x = left edge, min/max bound it;
+        // facesRight = which way the artwork itself looks.
+        const HOME_KOI_SWIMMERS = [
+            { slot: "home_koi_2", x: 518, y: 678, min: 330, max: 620, speed: 20, facesRight: true },
+            { slot: "home_koi_3", x: 1000, y: 676, min: 830, max: 1080, speed: 16, facesRight: false }
+        ];
+        const HOME_KOI_JUMPER = "home_koi_1"; // diving pose, head down-left
+        const HOME_KOI_JUMP_ZONES = [[360, 620], [850, 1060]]; // where it may leap (x range, px)
+        const HOME_KOI_WATER_Y = 704;      // water line the leap starts from and dives back into (px)
+        const HOME_KOI_JUMP_H = 54;        // height of the leap (px)
+        const HOME_KOI_JUMP_DX = 70;       // distance covered during the leap (px)
+        const HOME_KOI_JUMP_T = 1.0;       // duration of a leap (s)
+        const HOME_KOI_JUMP_GAP = [5, 10]; // pause between two leaps (s)
+
+        const HOME_LOGO_H = 196;           // display height of logo.png (px)
+        const HOME_LOGO_Y = 120;           // vertical center of the logo (px)
         const TITLE_SLIDE_DURATION = 0.6;  // how long the logo takes to slide in (s)
         const HOME_LOGO_BOUNCE_PX = 8;     // how far the logo bobs up and down once it has landed (px)
         const HOME_LOGO_BOUNCE_SPEED = 2.4; // logo bob speed (radians/s)
-        const HOME_CAR_BLINK_FPS = 4;      // police light bar: car_1 <-> car_2 per second
         const HOME_MENU_FADE_T = 0.3;      // START / LEADERBOARD fade in over this, once the title screen is complete (s)
+        const MENU_SHADOW = "rgba(15,25,15,0.8)"; // drop shadow under the white menu text on the forest
 
-        // --- Home characters (all sized by CHARACTER height, never by frame height,
-        //     because idle_* and scared use a taller/narrower frame than the
-        //     915x915 run squares). Their actual sizes are derived further down, from
-        //     the gameplay values, so the home screen and the run share ONE scale. ---
-        const HOME_GROUND_FRAC = 0.93;     // where the characters' feet sit (fraction of the decor height)
-        const HOME_CHAR_FRAC = 0.30;       // idle character position (fraction of the screen width)
-        const HOME_IDLE_FPS = 2.2;         // idle_1..4 loop speed (looking around, slow)
-        const HOME_RUN_FPS = 12;           // run loop speed when the runner sprints off
-        const HOME_KOALA_FPS = 8;          // koala walk loop speed
-
-        // --- Home intro sequence (scripted, plays every time START is pressed) ---
-        const HOME_SEQ_KOALA_IN = 1.5;     // koala drives/walks in from the right (s)
-        const HOME_SEQ_KOALA_STOP = 0.7;   // koala stands still, menacing (s)
-        const HOME_SEQ_SCARED = 0.6;       // the red character is scared, frozen (s)
-        const HOME_SEQ_RUNOUT = 1.0;       // he sprints off to the right, then the game starts (s)
-        const HOME_KOALA_START_FRAC = 1.15; // koala's entry x (fraction of screen width, off-screen right)
-        const HOME_KOALA_STOP_FRAC = 0.46;  // where he stops: roughly FACING the red character, well
-        // clear of the parked car (fraction of screen width)
-        const HOME_CAR_FRAC = 0.82;         // the police car is parked here the whole time
-        const HOME_RUNOUT_SPEED = 620;     // red character sprint speed during the run-out (px/s)
-        const HOME_WIPE_T = 0.35;          // black wipe sliding in before the game starts (s)
+        // --- START sequence: the gummy crosses the screen, portal to portal ---
+        // A portal opens on the left, the red gummy runs out of it, past the
+        // meditating samurai, into a second portal on the right; both close, and the
+        // run starts. It plays every time START is pressed (press again = skip).
+        const PORTAL_LEFT_X = 70;          // portal centers (px)
+        const PORTAL_RIGHT_X = 1195;
+        const PORTAL_SINK = 6;             // the portal's bottom sits this far below GROUND_Y (px)
+        const PORTAL_OPEN_T = 0.3;         // a portal opens / closes in this long (s)
+        const PORTAL_HOLD_T = 0.25;        // the left portal stays open this long once the gummy is out (s)
+        const INTRO_GUMMY_SPEED = 460;     // run speed across the screen (px/s)
+        const INTRO_GUMMY_HOP_PX = 3;      // with a single run frame: a little hop instead of a leg cycle (px)
+        const INTRO_GUMMY_HOP_HZ = 5;      // hops per second
+        const INTRO_FADE_T = 0.4;          // fade to black before the run (s)
 
         // --- Death sequence ---
         // Two beats: the runner is thrown into his `hurt` pose and freezes there while a
@@ -207,13 +217,8 @@
 
         /* ---------------------------------------------------------------------
            GAMEPLAY CONSTANTS
-           All values below were scaled by SCREEN_H_RATIO = 649/548 = 1.184 when the
-           playfield grew from 1021x548 to 1124x649, so the game keeps exactly the same
-           proportions and difficulty as before — it is simply rendered bigger.
-           Since then the playfield has been made VIRTUAL (see PLAYFIELD_W/H): it is a
-           fixed 1116x649 that gets scaled into whatever opening the cabinet art has, so
-           swapping the art (arcade -> laptop frame) no longer touches a single value
-           here. Only change these if you actually want to change the GAME.
+           In screen pixels (1280x720). Only change these if you actually want to
+           change the GAME.
            --------------------------------------------------------------------- */
 
         // --- Run speed & scoring ---
@@ -234,83 +239,23 @@
 
         // --- Player hitbox (NEVER changes during a run, only visuals change) ---
         const PLAYER_X = 130;              // fixed horizontal position of the player (~12% from the left)
-        const PLAYER_W = 99;               // hitbox width (px) — sized to the sprite: head AND tail are inside
-        const PLAYER_H = 109;              // hitbox height (px) — matches the drawn character height
+        const PLAYER_W = 70;               // hitbox width (px) — gummy_run_1 is 74 wide
+        const PLAYER_H = 115;              // hitbox height (px) — the whole gummy_run_1 frame, its ground
+        // shadow included, so the image's bottom row sits on GROUND_Y like the samurai's
         const HITBOX_PAD = 7;              // collision forgiveness: hitbox is shrunk by this on each side (px)
 
-        // --- Player sprites ---
-        // Every player_* frame shares ONE 915x915 square, with the artwork already
-        // aligned inside it (feet flush to the bottom edge, y=31..915 = 96.6% of the
-        // square). So we draw the WHOLE square, untrimmed, anchored bottom-center: the
-        // frames then line up perfectly with zero per-frame bookkeeping.
+        // --- Player sprites: the red gummy (gummy_run_1..N, gummy_jump, ...) ---
+        // Pixel art, drawn at its NATIVE size, feet on the bottom of the hitbox.
         const ANIM_FPS = 10;               // speed of the run / hold animation loops (frames per second)
-        const RUN_FRAME_COUNT = 4;         // number of player_run_* frames
-        const HOLD_FRAME_COUNT = 3;        // number of player_hold_* frames
+        const RUN_FRAME_COUNT = 4;         // most gummy_run_* frames looked for
+        const HOLD_FRAME_COUNT = 3;        // number of gummy_hold_* frames
         const DEBUG_HITBOX = true;         // true = draw the real collision box over the sprite (alignment check)
-        const PLAYER_SPRITE_H = 118;       // the 915x915 SQUARE is drawn at this height (px), so the
-        // character inside it stands 118 * 0.966 = 114px tall
-        const PLAYER_ART_FILL = 0.966;     // fraction of the square actually covered by the character
-        // player_hurt is the one exception: its artwork sits vertically CENTERED in
-        // the square (y=150..765), because the character is thrown through the air —
-        // so it is anchored on the hitbox CENTER instead of on the feet.
+        // gummy_hurt is the one exception: the character is thrown through the air, so
+        // it is anchored on the hitbox CENTER instead of on the feet.
 
         // --- World layout ---
-        const GROUND_Y = 600;              // vertical position of the ground line (px from top of the screen window)
-        // (49px of ground left below it, half of what it used to be)
-
-        // --- Run backdrop (TEST art — a throwaway DA, it will be redrawn) ---
-        // Every layer was drawn 1:1 for the 649px-tall playfield, so each one is
-        // drawn at its NATIVE height and tiled / repeated along the width.
-        // Photoshop's layer export numbers from the TOP layer down, so the draw
-        // order, back to front, is: bg (sky), sun, clouds, skyline_far,
-        // skyline_near, birds, rail (the bridge), train, sidewalk, road.
-        // A layer's `par` is its parallax: the fraction of the world speed it
-        // scrolls at (1 = glued to the road the player runs on).
-        const ROAD_ABOVE_FEET = 23;        // px of road visible BEHIND the runner: 600 - 23 = 577,
-        // and 577 + 72 (road.png) lands exactly on the bottom edge
-        const SIDEWALK_H = 61;             // sidewalk.png's native height, stacked right on the road
-        const SKYLINE_FAR_PAR = 0.10;      // skyline_far, the taller city furthest back
-        const SKYLINE_NEAR_PAR = 0.18;     // skyline_near, in front of it
-        // Both skylines stand on the sidewalk's top edge, behind the bridge.
-        const RAIL_PAR = 0.5;              // the bridge: the closest scenery behind the street
-        const RAIL_SINK = 3;               // rail.png's last 2 rows are empty: 3 buries the pillars'
-        // feet one pixel behind the sidewalk
-        const RAIL_DECK_Y = 19;            // first opaque row of rail.png = the deck the train rides
-        // The train runs ON the bridge, the same way as the player. Its speed is a
-        // multiple of the run speed: 1 = it keeps pace with him (stands still on
-        // screen), above 1 it slowly overtakes him. The jetpack boost only moves the
-        // camera, not the train, so a boost lets the runner catch it back up.
-        const TRAIN_SPEED_MULT = 1.25;
-        const TRAIN_START_X = 60;          // the train's left edge on screen when a run begins (px)
-        const TRAIN_GAP = 700;             // empty track between two passes (px, on screen)
-        const TRAIN_WHEELS_Y = 137;        // bottom of the artwork inside train.png (measured)
-        const TRAIN_SINK = 4;              // px the wheels sit INTO the deck, so it rides the track
-        // Birds: they fly right to left on their own, on top of the parallax
-        const BIRDS_SPEED = 70;            // their own flying speed (px/s)
-        const BIRDS_PAR = 0.2;             // plus this fraction of the world speed
-        const BIRDS_Y_MIN = 100;           // top edge range of a pass (px): above the train,
-        const BIRDS_Y_MAX = 150;           // in front of the skylines
-        const BIRDS_GAP_MIN = 200;         // off-screen distance before the next pass (px)
-        const BIRDS_GAP_MAX = 900;
-        const BIRDS_BOB_PX = 4;            // gentle up-and-down while they fly (px)
-        // Clouds: the SAME three layers as in dgm-runner's RUN_CLOUD_LAYERS (same
-        // slots, top edge, gap, parallax and phase). Only `h` changed, to each new
-        // sprite's native height. `gap` is wider than the playfield, so at most one
-        // copy per layer is ever on screen.
-        const RUN_CLOUD_LAYERS = [
-            { slot: "cloud_run_3", h: 182, y: 10, gap: 1140, par: 0.06, phase: 900 },
-            { slot: "cloud_run_1", h: 159, y: 48, gap: 1140, par: 0.11, phase: 480 },
-            { slot: "cloud_run_2", h: 122, y: 104, gap: 1140, par: 0.18, phase: 120 }
-        ];
-        // The sun plays the old MIRADOR's part: the furthest thing after the sky,
-        // drifting the OTHER way (right, with the player) off its own boost-free
-        // odometer — at half the mirador's speed again (-0.014 / 2).
-        const SUN_PAR = -0.007;
-        const SUN_GAP = 1250;              // one sun on screen, never two
-        const SUN_START_X = 150;           // where it stands on frame one: left of cloud_run_3, which
-        // opens on x 240..647 and would hide it (clouds are drawn in front of the sun)
-        const SUN_PHASE = SUN_GAP - SUN_START_X; // parks it at SUN_START_X (see drawStrip)
-        const SUN_Y = 120;                 // top edge (px) — just under the hearts of the HUD
+        const GROUND_Y = 560;              // the running line (px from the top of the screen) — the
+        // samurai, the katana and the gummy all stand on it, on the title screen too
 
         // --- Obstacle generation (time-based spacing => always playable at any speed) ---
         const SPAWN_GAP_MIN = 0.95;        // minimum time between two hazards (s)
@@ -335,14 +280,10 @@
         const PIGEON_WAVE_SPEED = 1.9;     // bobbing speed (radians/s)
         const PIGEON_DIAGONAL_CHANCE = 0.35; // share of pigeons gliding down diagonally instead of bobbing
         const PIGEON_DIAGONAL_RISE = 95;   // how high a diagonal one starts above the clearance line (px)
-        // ONE SIZE EVERYWHERE: the home screen, the intro sequence and the death scene
-        // all reuse the sizes the run itself uses. The old "he arrives bigger, bumps
-        // into something and shrinks" gag is gone — the character never changes scale.
-        const PLAYER_CHAR_H = PLAYER_SPRITE_H * PLAYER_ART_FILL; // 114px: the character inside the square
-        const HOME_CHAR_H = PLAYER_CHAR_H;                       // same red character as in game
-        const HOME_KOALA_H = KOALA_SIZES[1].h;                   // same koala as the tall ground obstacle
-        const DEATH_KOALA_H = HOME_KOALA_H;                      // and the same one catching you at the end
-        const HOME_CAR_H = Math.round(HOME_KOALA_H * 0.74);      // the police car, roof a bit below his ears
+        // The death scene reuses the run's own sizes
+        const DEATH_KOALA_H = KOALA_SIZES[1].h;  // the koala catching you = the tall ground obstacle
+        const DEATH_KOALA_FPS = 8;               // its walk loop speed
+        const GAMEOVER_FRAME_H = 148;            // gameover_player_* are drawn at this height (px)
 
         const OVERHEAD_CLEARANCE = 45;     // free space between the player's head (running) and an overhead block (px)
         const GAP_WIDTH_MIN = 130;         // hole in the ground: min width (px) — must stay jumpable
@@ -402,9 +343,9 @@
         const JET_SPOOL_UP = 7;            // how fast the boost kicks in (1/s)
         const JET_SPOOL_DOWN = 2.5;        // how fast it fades after the jetpack stops (1/s)
 
-        // --- HUD placement (the cabinet art slightly overlaps the window edges) ---
-        const HUD_INSET_X = 76;            // horizontal distance of the HUD from the screen edges (px)
-        const HUD_INSET_Y = 50;            // vertical distance of the HUD from the top (px)
+        // --- HUD placement ---
+        const HUD_INSET_X = 40;            // horizontal distance of the HUD from the screen edges (px)
+        const HUD_INSET_Y = 40;            // vertical distance of the HUD from the top (px)
 
         // --- Juice / feedback ---
         const FLASH_DURATION = 0.12;       // duration of screen flashes (s)
@@ -419,68 +360,20 @@
 
         const canvas = document.getElementById("game");
         const ctx = canvas.getContext("2d");
-        // W/H are the GAME's coordinates. They are a VIRTUAL playfield, NOT the pixel
-        // size of the console's window: the whole game is authored at 1116x649 and then
-        // scaled uniformly into the SCREEN_W x SCREEN_H opening when it is drawn.
-        // That indirection is what lets the cabinet art change size (1920x1080 arcade ->
-        // 1440x880 laptop) without retuning a single gameplay, sprite or HUD constant —
-        // every value in the block above still means exactly what it used to mean.
-        // The playfield keeps the opening's aspect ratio, so nothing is ever stretched.
-        const PLAYFIELD_H = 649;                                          // authoring height (unchanged since the 1124x649 era)
-        const PLAYFIELD_W = Math.round(PLAYFIELD_H * SCREEN_W / SCREEN_H); // 1116 — matches the opening's 1.720 ratio
-        const SCREEN_SCALE = SCREEN_H / PLAYFIELD_H;                      // 0.7535 — game px -> canvas px
-        const W = PLAYFIELD_W;
-        const H = PLAYFIELD_H;
 
-        // --- Responsive scaling: fill the window, keep the cabinet ratio, centered.
-        // The game is DESKTOP ONLY (see the gate below), so there is no portrait
-        // rotation any more: a screen that cannot show the console in landscape gets
-        // the "get a PC" message instead of a sideways picture.
+        // --- Fit the screen to the window: as big as it gets without cropping, 16:9
+        // kept, centered by the page's flexbox. Whatever the window has left over
+        // stays black — bars on the sides, or above and below.
         function fitCanvas() {
-            const scale = window.innerWidth / CANVAS_W;
-
-            const displayW = CANVAS_W * scale;
-            const displayH = CANVAS_H * scale;
-
-            const TOP_CROP_MAX = 33;
-            const BOTTOM_CROP_MAX = 137;
-
-            const topMax = TOP_CROP_MAX * scale;
-            const bottomMax = BOTTOM_CROP_MAX * scale;
-
-            const overflow = Math.max(0, displayH - window.innerHeight);
-
-            // D'abord on coupe le haut
-            const cropTop = Math.min(overflow, topMax);
-
-            // Ensuite uniquement le bas
-            const cropBottom = Math.max(0, overflow - cropTop);
-
-            canvas.style.width = Math.ceil(displayW) + "px";
-            canvas.style.height = Math.ceil(displayH) + "px";
-
-            canvas.style.position = "absolute";
-            canvas.style.left = "0";
-            canvas.style.transform = "none";
-
-            if (overflow === 0) {
-                // Fenêtre plus haute que le cabinet :
-                // tout le bleu supplémentaire reste EN HAUT
-                canvas.style.top = "auto";
-                canvas.style.bottom = "0";
-            } else {
-                // Fenêtre plus basse :
-                // crop du haut jusqu'à 33px, puis crop du bas
-                canvas.style.top = -cropTop + "px";
-                canvas.style.bottom = "auto";
-            }
-
+            const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+            canvas.style.width = Math.floor(W * scale) + "px";
+            canvas.style.height = Math.floor(H * scale) + "px";
         }
         window.addEventListener("resize", fitCanvas);
         window.addEventListener("orientationchange", fitCanvas);
         fitCanvas();
 
-        // TEST FULLSCREEN — appuie sur F
+        // F toggles fullscreen
         window.addEventListener("keydown", (e) => {
             if (e.code === "KeyF") {
                 if (!document.fullscreenElement) {
@@ -493,12 +386,9 @@
 
         /* ---------------------------------------------------------------------
            DESKTOP GATE
-           The console art is a laptop-shaped 16:10 frame built to be looked at on a
-           real computer screen. Anything else — phone, tablet, or a desktop window
-           too small to show the cabinet — gets a message instead of the game.
+           The game is played with a keyboard or a mouse: phones and tablets get a
+           message instead of the game.
            --------------------------------------------------------------------- */
-        const MIN_DESKTOP_W = 0;   // narrowest window the console still reads on (CSS px)
-        const MIN_DESKTOP_H = 0;   // shortest ditto
         const gate = document.getElementById("gate");
         let blocked = false;
         // A touch-only device: no fine pointer and no hover. iPadOS lies about its UA
@@ -516,8 +406,7 @@
         function isDesktop() {
             return !isTouchOnlyDevice();
         }
-        // Re-evaluated on every resize: a desktop user who shrinks the window gets the
-        // message too, and gets the game straight back when they grow it again.
+        // Re-evaluated on every resize / rotation.
         function updateDesktopGate() {
             blocked = !isDesktop();
             gate.hidden = !blocked;
@@ -535,29 +424,24 @@
            without touching the code.
            --------------------------------------------------------------------- */
         const ASSET_SLOTS = [
-            // Cabinet
-            "frame_cabinet",
-            // Home decor (all three share a 1060x618 canvas)
-            "clouds_1", "clouds_2", "bg_prison", "logo",
-            // Home characters. NOTE: the home run loop and the walking koala are the SAME
-            // images as the in-game runner and the ground obstacle, so they are not loaded
-            // twice — see HOME_RUN_BASE / HOME_KOALA_BASE below.
-            "idle_1", "idle_2", "idle_3", "idle_4",
-            "scared", "koala_standing",
-            "car_1", "car_2",
-            // Player (one shared 915x915 square per frame)
-            "player_run_1", "player_run_2", "player_run_3", "player_run_4",
-            "player_hold_1", "player_hold_2", "player_hold_3",
-            "player_jump", "player_doublejump", "player_hurt",
+            // Title screen: the forest (positions in HOME_BACK_LAYERS & co.)
+            "home_sky", "home_cloud_1", "home_cloud_2", "home_cloud_3", "home_cloud_4",
+            "home_mountains", "home_forest", "home_waterfall_2", "home_waterfall_3",
+            "home_rocks", "home_ground", "home_leaf",
+            "home_samurai", "home_katana", "home_koi_1", "home_koi_2", "home_koi_3",
+            "logo",
+            // START sequence
+            "portal",
+            // Player: the red gummy. Only gummy_run_1 exists so far — the others fall
+            // back to it (run loop) or to the placeholder until they are drawn.
+            "gummy_run_1", "gummy_run_2", "gummy_run_3", "gummy_run_4",
+            "gummy_hold_1", "gummy_hold_2", "gummy_hold_3",
+            "gummy_jump", "gummy_doublejump", "gummy_hurt",
             // Obstacles (2 animation frames each)
             "koala_running_1", "koala_running_2",
             "pigeon_1", "pigeon_2",
-            // Collectibles
+            // Collectibles (collectible_shrimp.png is in assets/ but not wired in yet)
             "collectible_points", "collectible_jetpack", "collectible_heart",
-            // In-game decor — TEST art, back to front (see "Run backdrop" above)
-            "bg", "sun", "cloud_run_1", "cloud_run_2", "cloud_run_3",
-            "skyline_far", "skyline_near", "birds", "rail", "train",
-            "sidewalk", "road",
             // Death sequence
             "gameover_player_1", "gameover_player_2", "gameover_player_3",
             "gameover_player_4", "gameover_player_5", "gameover_player_6",
@@ -587,14 +471,9 @@
             "leaderboard_player_2": { x: 99, y: 191, w: 628, h: 640 },
             "leaderboard_player_3": { x: 200, y: 216, w: 616, h: 616 },
             "leaderboard_player_4": { x: 304, y: 155, w: 467, h: 670 }
-            // Deliberately NOT trimmed:
-            //  - player_*           : already aligned inside a shared 915x915 square
-            //  - koala_running_* /
-            //    pigeon_*           : animation frames share a canvas; trimming each one
-            //                         separately would make them jitter frame to frame
-            //  - gameover_player_*  : same, they share a 1888x1436 canvas
-            //  - collectible_jetpack: the artwork already fills its 886x1122 frame
-            //  - collectible_points : the test Birkin already fills its 51x51 frame
+            // Deliberately NOT trimmed: animation frames that share a canvas
+            // (koala_running_*, pigeon_*, gameover_player_*) — trimming each one
+            // separately would make them jitter frame to frame.
         };
 
         // Draws the slot image if it loaded (using its trim when measured).
@@ -636,7 +515,6 @@
         let player, obstacles, gaps, collectibles, particles, popups;
         let score, runTime, currentSpeed, worldX;
         let hazardTimer, collectTimer;
-        let sunX, trainOdo, birds;  // backdrop odometers + the flock (see "Run backdrop")
         let holding = false;       // is the jump button currently held? (drives the jetpack)
         let jumpBufferTimer = 0;   // time left on a buffered jump press
         let flashTimer = 0, flashColor = "#fff";
@@ -651,7 +529,6 @@
         let paused = false;        // "P" pauses the run (world frozen, overlay shown)
         let bootSoundPlayed = false; // soft power-on sound, once (browsers may mute it before any click)
         let bootChimeDone = false;   // fallback: play the chime on the FIRST press (audio unlocked there)
-        let cloudScroll = 0;       // home screen: horizontal offset of the cloud strip (px)
 
         function resetRun() {
             player = {
@@ -672,9 +549,6 @@
             runTime = 0;
             currentSpeed = BASE_SPEED;
             worldX = 0;            // total distance traveled, used for ground marks animation
-            sunX = 0;              // the sun's own boost-free odometer
-            trainOdo = 0;          // the train's (TRAIN_SPEED_MULT x the run speed)
-            birds = { x: W * 0.6, y: rand(BIRDS_Y_MIN, BIRDS_Y_MAX) };
             paused = false;
             hazardTimer = 1.2;     // small breather before the first obstacle
             collectTimer = 2.0;
@@ -722,7 +596,8 @@
         const sndSmash = () => beep(250, 90, 0.15, "square");
         const sndDeath = () => beep(220, 40, 0.45, "sawtooth");
         const sndBootUp = () => beep(160, 640, 0.7, "sine"); // soft, gentle power-on sweep
-        const sndSiren = () => beep(700, 420, 0.35, "sine");  // the koala cop rolling in
+        const sndPortal = () => beep(180, 760, 0.4, "triangle"); // a portal opening
+        const sndWhoosh = () => beep(900, 140, 0.25, "sine");    // the gummy vanishing into it
         const sndJetIgnite = () => beep(120, 900, 0.22, "sawtooth"); // jetpack whoosh
         const sndJetEmpty = () => beep(220, 60, 0.25, "square");     // out of fuel sputter
 
@@ -787,39 +662,40 @@
         // only respond — after that. Add any future title-screen animation to this check.
         function homeReady() { return homeTime >= TITLE_SLIDE_DURATION && allAssetsSettled(); }
         function startIntro() {
-            // The scripted home sequence (koala cop shows up, the runner bolts) plays
-            // every time START is pressed — it IS the transition into the run.
+            // The START sequence (portal, gummy run, portal) plays every time START
+            // is pressed — it IS the transition into the run.
             state = "intro";
             introTime = 0;
-            sndSiren();
+            sndPortal();
         }
         function startPlaying() { resetRun(); state = "playing"; }
 
-        // Key moments of the home sequence, all derived from the constants above.
-        //   0 .. koalaIn      the koala cop rolls in from the right
-        //   .. koalaStop      he stops, standing still
-        //   .. scared         the red character panics (scared)
-        //   .. end            he sprints off to the right, black wipe, run starts
+        // Key moments of the START sequence (s since START), from the constants above
+        // and the gummy's own width:
+        //   0 .. run          the left portal opens
+        //   .. leftClose      the gummy is fully out of it, it closes behind him
+        //   rightOpen         the right portal opens ~1s before he gets there
+        //   .. arrive         he is fully inside it, it closes
+        //   fade .. end       fade to black, the run starts
         function introTimeline() {
-            const koalaIn = HOME_SEQ_KOALA_IN;
-            const koalaStop = koalaIn + HOME_SEQ_KOALA_STOP;
-            const scared = koalaStop + HOME_SEQ_SCARED;
-            const end = scared + HOME_SEQ_RUNOUT;
-            const wipe = end - HOME_WIPE_T;                    // black wipe starts near the end
-            return { koalaIn, koalaStop, scared, wipe, end };
+            const gw = gummyWidth();
+            const run = PORTAL_OPEN_T;
+            const arrive = run + (PORTAL_RIGHT_X - PORTAL_LEFT_X + gw) / INTRO_GUMMY_SPEED;
+            const leftClose = run + gw / INTRO_GUMMY_SPEED + PORTAL_HOLD_T;
+            const rightOpen = Math.max(0, arrive - 1.0 - PORTAL_OPEN_T);
+            const fade = arrive + PORTAL_OPEN_T;
+            return { run, leftClose, rightOpen, arrive, fade, end: fade + INTRO_FADE_T };
         }
 
-        // Converts a mouse/touch event into internal GAME coordinates (0..W, 0..H).
-        // Three steps, mirroring draw(): CSS px -> canvas px -> minus the window's
-        // origin -> divided by SCREEN_SCALE, because the game is drawn scaled into the
-        // console's opening rather than at 1:1.
+        // Converts a mouse/touch event into GAME coordinates (0..W, 0..H): the canvas
+        // is the screen, only scaled by CSS.
         function canvasPos(e) {
             const rect = canvas.getBoundingClientRect();
             const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
             const cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
             return {
-                x: ((cx - rect.left) * CANVAS_W / rect.width - SCREEN_X) / SCREEN_SCALE,
-                y: ((cy - rect.top) * CANVAS_H / rect.height - SCREEN_Y) / SCREEN_SCALE
+                x: (cx - rect.left) * W / rect.width,
+                y: (cy - rect.top) * H / rect.height
             };
         }
 
@@ -832,7 +708,7 @@
         }
 
         // Menu rows vertical positions (used for drawing AND for click/tap selection)
-        const HOME_MENU_Y = [436, 492];      // lower half of the screen, well clear of the logo
+        const HOME_MENU_Y = [440, 490];      // over the rocks, clear of the logo and the samurai
         const GAMEOVER_MENU_Y = [474, 535];
 
         // Clicking/tapping picks the menu row closest to the click before confirming
@@ -1272,7 +1148,7 @@
             // --- Global timers (run in every state, for juice) ---
             if (flashTimer > 0) flashTimer -= dt;
             if (shakeTimer > 0) shakeTimer -= dt;
-            cloudScroll += CLOUD_SCROLL_SPEED * dt; // home screen clouds keep drifting
+            if (state === "home" || state === "intro") updateHomeScene(dt); // the forest keeps living
             updateParticles(dt);
             updatePopups(dt);
 
@@ -1297,12 +1173,8 @@
                 const before = introTime;
                 introTime += dt;
                 const tl = introTimeline();
-                // The koala plants himself: a thud, and the runner realises he is caught
-                if (before < tl.koalaIn && introTime >= tl.koalaIn) {
-                    shake();
-                    sndSmash();
-                }
-                if (before < tl.koalaStop && introTime >= tl.koalaStop) sndSiren();
+                if (before < tl.rightOpen && introTime >= tl.rightOpen) sndPortal();
+                if (before < tl.arrive && introTime >= tl.arrive) sndWhoosh();
                 if (introTime >= tl.end) startPlaying();
             } else if (state === "dying") {
                 // The koala reaching the player is a beat of its own: a thud and a shake,
@@ -1343,17 +1215,6 @@
             const dx = currentSpeed * (1 + JET_SPEED_BOOST * jetPower) * dt; // pixels traveled this frame
             worldX += dx;
             score += dx * SCORE_PER_PIXEL;
-
-            // The sun and the train ride their own odometers: the run speed ONLY, never
-            // the jetpack boost — a boost throws the street past you, not the horizon.
-            sunX += currentSpeed * dt;
-            trainOdo += currentSpeed * TRAIN_SPEED_MULT * dt;
-            // The birds cross right to left, then come back after a random gap
-            birds.x -= BIRDS_SPEED * dt + dx * BIRDS_PAR;
-            if (birds.x < -(assets["birds"] ? assets["birds"].width : 0)) {
-                birds.x = W + rand(BIRDS_GAP_MIN, BIRDS_GAP_MAX);
-                birds.y = rand(BIRDS_Y_MIN, BIRDS_Y_MAX);
-            }
 
             // --- Player physics ---
             player.vy += GRAVITY * dt;
@@ -1499,77 +1360,12 @@
            DRAWING
            ===================================================================== */
 
-        // Traces the console's screen opening as a rounded rect, inset by SCREEN_INSET.
-        // Used as an even-odd hole so the cabinet can be drawn over the game.
-        function screenOpeningPath() {
-            const x = SCREEN_X + SCREEN_INSET, y = SCREEN_Y + SCREEN_INSET;
-            const w = SCREEN_W - SCREEN_INSET * 2, h = SCREEN_H - SCREEN_INSET * 2;
-            const r = Math.min(SCREEN_RADIUS, w / 2, h / 2);
-            ctx.moveTo(x + r, y);
-            ctx.arcTo(x + w, y, x + w, y + h, r);
-            ctx.arcTo(x + w, y + h, x, y + h, r);
-            ctx.arcTo(x, y + h, x, y, r);
-            ctx.arcTo(x, y, x + w, y, r);
-            ctx.closePath();
-        }
-
-        // A soft shadow along the inside edges of the opening, as if the picture were
-        // set back inside the console shell. Drawn in screen space (0..W x 0..H).
-        function drawScreenInnerShadow() {
-            const d = SCREEN_INNER_SHADOW;
-            if (d <= 0) return;
-            const edge = (x0, y0, x1, y1, alpha, rx, ry, rw, rh) => {
-                const g = ctx.createLinearGradient(x0, y0, x1, y1);
-                g.addColorStop(0, `rgba(0,0,0,${alpha})`);
-                g.addColorStop(1, "rgba(0,0,0,0)");
-                ctx.fillStyle = g;
-                ctx.fillRect(rx, ry, rw, rh);
-            };
-            edge(0, 0, 0, d, 0.32, 0, 0, W, d);              // top — deepest, light falls from above
-            edge(0, 0, d, 0, 0.24, 0, 0, d, H);              // left
-            edge(0, H, 0, H - d, 0.17, 0, H - d, W, d);      // bottom
-            edge(W, 0, W - d, 0, 0.17, W - d, 0, d, H);      // right
-        }
-
         function draw() {
-            // Layer 1 — flat blue behind everything (no background image any more).
-            ctx.fillStyle = CANVAS_BG;
-            ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-            // Layer 2 — the GAME goes down first, so the console can be laid over it.
-            // A black backing sits under it in case a screen ever leaves a gap.
-            ctx.fillStyle = "#000";
-            ctx.fillRect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H);
-            ctx.save();
-            ctx.translate(SCREEN_X, SCREEN_Y);
-            // From here on the context is in GAME coordinates (0..W x 0..H): the virtual
-            // playfield is squeezed into the opening, so drawScreen() never has to know
-            // how big the console art happens to be.
-            ctx.scale(SCREEN_SCALE, SCREEN_SCALE);
-            ctx.beginPath();
-            ctx.rect(0, 0, W, H);
-            ctx.clip();
+            ctx.imageSmoothingEnabled = false; // pixel art: a scaled sprite stays crisp, never blurred
             drawScreen();
-            drawScreenInnerShadow();
-            ctx.restore();
-
-            // Layer 3 — the console ON TOP, with the screen opening punched out of it.
-            // The path is the full canvas PLUS the opening, filled even-odd: the opening
-            // becomes a hole, so the cabinet's bezel and rounded corners overlap the
-            // game rather than the game covering the art.
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(0, 0, CANVAS_W, CANVAS_H);
-            screenOpeningPath();
-            ctx.clip("evenodd");
-            if (!drawSlot("frame_cabinet", 0, 0, CANVAS_W, CANVAS_H)) {
-                ctx.fillStyle = "#191114"; // fallback bezel; the hole keeps the game visible
-                ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-            }
-            ctx.restore();
         }
 
-        // One game screen, drawn in coordinates 0..W x 0..H (the console's window)
+        // One game screen, drawn in coordinates 0..W x 0..H
         function drawScreen() {
             if (state === "boot") { drawBoot(); return; }
             if (state === "home") { drawHome(); return; }
@@ -1584,15 +1380,15 @@
             if (state === "playing" && player.jetting) s = Math.max(s, 1.6);
             if (s > 0) ctx.translate(rand(-s, s), rand(-s, s));
 
-            // --- Backdrop: sky, sun, clouds, skylines, birds, bridge, train ---
+            // --- Backdrop (placeholder until the in-game art arrives) ---
             drawRunBackdrop();
-            // Jetpack boost: speed streaks rushing past, behind the street
+            // Jetpack boost: speed streaks rushing past, behind the ground
             drawSpeedLines();
-            // --- The street: the sidewalk, then the road the player runs on ---
+            // --- The ground the player runs on ---
             drawRunGround();
 
-            // --- Holes cut into the road (drawn over it, image or not) ---
-            const holeTop = assets["road"] ? runLayout().roadTop : GROUND_Y - 3;
+            // --- Holes cut into the ground ---
+            const holeTop = GROUND_Y - 3;
             ctx.fillStyle = "#1c1c1c";
             for (const g of gaps) ctx.fillRect(g.x, holeTop, g.w, H - holeTop);
 
@@ -1687,7 +1483,7 @@
             drawLives(HUD_INSET_X, HUD_INSET_Y + 40);
 
             // Controls reminder, always visible during the run
-            if (state === "playing") drawControlsHint(H - 34, "#f0f0f0"); // light: it sits on the road
+            if (state === "playing") drawControlsHint(H - 34, "#606060"); // it sits on the ground band
 
             ctx.restore();
 
@@ -1822,10 +1618,13 @@
 
             drawJetFlame(); // behind the runner
 
-            // --- Sprite path (visuals only — the collision hitbox NEVER changes) ---
-            const img = assets[playerSpriteName()];
+            // --- Sprite path (visuals only — the collision hitbox NEVER changes).
+            // A state whose frame isn't drawn yet (jump, hold...) shows the run frame. ---
+            let name = playerSpriteName();
+            if (!assets[name]) name = playerSpritePrefix() + "_run_1";
+            const img = assets[name];
             if (img) {
-                drawSpriteAnchored(img, playerSpriteName());
+                drawSpriteAnchored(img, name);
                 return;
             }
 
@@ -1856,9 +1655,9 @@
             }
         }
 
-        // The player's sprite set. Only one set now that phase 2 is gone.
+        // The player's sprite set: the red gummy (gummy_run_1, gummy_jump, ...)
         function playerSpritePrefix() {
-            return "player";
+            return "gummy";
         }
 
         // Picks the sprite frame matching the current player state
@@ -1878,37 +1677,28 @@
         }
 
         // Run frames actually delivered. A loop with fewer frames than RUN_FRAME_COUNT
-        // (the test art has ONE) simply cycles over what exists; none = placeholder.
+        // (only gummy_run_1 so far) simply cycles over what exists; none = placeholder.
         function runFrameCount() {
             let n = 0;
-            while (n < RUN_FRAME_COUNT && assets["player_run_" + (n + 1)]) n++;
+            while (n < RUN_FRAME_COUNT && assets[playerSpritePrefix() + "_run_" + (n + 1)]) n++;
             return n || RUN_FRAME_COUNT;
         }
 
-        // Draws a player sprite. Every frame shares ONE 915x915 square with the artwork
-        // already aligned inside it, so the whole square is drawn UNTRIMMED at the same
-        // fixed height (PLAYER_SPRITE_H) and the character never shifts or resizes
-        // between the run, jump, doublejump and hold states.
-        //
-        // One exception: player_hurt holds a character thrown through the air, drawn
-        // vertically CENTERED in its square rather than standing on the bottom edge —
-        // so it is anchored on the hitbox's CENTER instead of on its feet line.
+        // Draws a player sprite at its NATIVE size, centered on the hitbox, its bottom
+        // row on the hitbox's bottom edge (= GROUND_Y when running). squash is the
+        // takeoff / landing juice — visual only, the hitbox never changes.
+        // gummy_hurt (thrown through the air) is anchored on the hitbox CENTER instead.
         function drawSpriteAnchored(img, name) {
-            // squash is the takeoff/landing juice — visual only, hitbox untouched
-            // A 915x915 square carries padding (the character fills 96.6% of it); a
-            // non-square frame is the character alone, trimmed, so it is drawn at the
-            // character's own height instead — both come out the same size.
-            const baseH = img.width === img.height ? PLAYER_SPRITE_H : PLAYER_CHAR_H;
-            const h = baseH * squash;
-            const w = baseH * (img.width / img.height) * (2 - squash);
+            const h = img.height * squash;
+            const w = img.width * (2 - squash);
             const anchorX = player.x + PLAYER_W / 2; // horizontal center of the hitbox
             if (name && name.endsWith("_hurt")) {
                 const anchorY = player.y + PLAYER_H / 2; // CENTER anchor: he is airborne
-                ctx.drawImage(img, anchorX - w / 2, anchorY - h / 2, w, h);
+                ctx.drawImage(img, Math.round(anchorX - w / 2), Math.round(anchorY - h / 2), w, h);
                 return;
             }
-            const anchorY = player.y + PLAYER_H;      // feet line of the hitbox (= ground contact)
-            ctx.drawImage(img, anchorX - w / 2, anchorY - h, w, h);
+            const anchorY = player.y + PLAYER_H;      // bottom of the hitbox (= ground contact)
+            ctx.drawImage(img, Math.round(anchorX - w / 2), Math.round(anchorY - h), w, h);
         }
 
         // Debug: draws the REAL collision box (with its forgiveness padding) over the sprite
@@ -1963,8 +1753,8 @@
             ctx.stroke();
         }
 
-        // FALLBACK only, while no cloud_run_* PNG is in assets/ (see RUN_CLOUD_LAYERS).
-        // Soft fluffy clouds drifting slower than the ground (cheap parallax feel).
+        // Placeholder sky for the run, until its art arrives: soft fluffy clouds
+        // drifting slower than the ground (cheap parallax feel).
         // Overlapping circles + a flat belly = classic cartoon cloud silhouette.
         // RULE: nothing overlaps — the clouds are evenly spaced (one per slot, wider
         // than any cloud) and kept in a sky band ABOVE the highest point a pigeon can
@@ -1988,199 +1778,215 @@
         }
 
         /* =====================================================================
-           RUN BACKDROP (test art)
-           Everything that scrolls is one of two shapes: a single sprite repeated
-           along an endless strip (drawStrip: clouds, sun), or a texture tiled
-           edge to edge (drawTiled: skylines, bridge, sidewalk, road). The
-           parallax is just the offset handed to them.
+           RUN BACKDROP — placeholder until the in-game art arrives
            ===================================================================== */
 
-        function nativeH(slot) { return assets[slot] ? assets[slot].height : 0; }
-
-        // Vertical layout of the street, all derived from GROUND_Y (the feet):
-        //   roadTop      road.png, ROAD_ABOVE_FEET above the feet, down to the bottom
-        //   sidewalkTop  sidewalk.png, stacked right on top of the road
-        //   railTop      the bridge, its pillars standing on the sidewalk
-        //   deckTop      the bridge deck, where the train's wheels go
-        function runLayout() {
-            const roadTop = GROUND_Y - ROAD_ABOVE_FEET;
-            const sidewalkTop = roadTop - SIDEWALK_H;
-            const railTop = sidewalkTop + RAIL_SINK - nativeH("rail");
-            return { roadTop, sidewalkTop, railTop, deckTop: railTop + RAIL_DECK_Y };
-        }
-
-        // Repeats ONE sprite along an endless horizontal strip.
-        //   offset how far the strip has travelled, in px (any sign, any size)
-        //   h      on-screen height; the width follows the artwork
-        //   y      top edge
-        //   gap    empty space left between two copies
-        // Returns false when the image never loaded (nothing is drawn).
-        function drawStrip(slot, offset, h, y, gap) {
-            if (!assets[slot]) return false;
-            const w = h * slotAspect(slot);
-            const period = w + gap;
-            // Modulo that stays negative-safe, so the strip never jumps at offset 0
-            const start = -(((offset % period) + period) % period) - w;
-            for (let x = start; x < W + w; x += period) drawSlot(slot, x, y, w, h);
-            return true;
-        }
-
-        // Tiles a texture edge to edge (no gap), its width derived from the height it
-        // is drawn at, so nothing is stretched. Each tile is snapped to whole pixels
-        // and stretched ONE pixel under its neighbour: antialiased fractional edges
-        // would otherwise leave a hairline of whatever is behind at every seam.
-        function drawTiled(slot, offset, y, h) {
-            if (!assets[slot]) return false;
-            const w = h * slotAspect(slot);
-            const start = -(((offset % w) + w) % w);
-            for (let x = start - w; x < W + w; x += w) {
-                const x0 = Math.round(x), x1 = Math.round(x + w);
-                drawSlot(slot, x0, y, x1 - x0 + 1, h);
-            }
-            return true;
-        }
-
-        // The cloud layers, each moving at its own speed — that difference is what
-        // reads as depth. Returns false when not a single cloud image loaded.
-        function drawCloudLayers(layers, offsets) {
-            let drawn = false;
-            for (let i = 0; i < layers.length; i++) {
-                const L = layers[i];
-                if (drawStrip(L.slot, offsets[i] + (L.phase || 0), L.h, L.y, L.gap)) drawn = true;
-            }
-            return drawn;
-        }
-
-        // The flock, crossing right to left (its position is moved in update())
-        function drawBirds() {
-            const img = assets["birds"];
-            if (!img) return;
-            const bob = Math.sin(runTime * 3) * BIRDS_BOB_PX;
-            ctx.drawImage(img, birds.x, birds.y + bob, img.width, img.height);
-        }
-
-        // The train, riding the bridge deck. Its screen position is how far it has
-        // pulled ahead of the camera, at the bridge's parallax, wrapped around a loop
-        // of [off-screen left + TRAIN_GAP .. right edge] — so it leaves on the right,
-        // and comes back in from the left (or the other way round under a boost).
-        function drawTrain(deckTop) {
-            const img = assets["train"];
-            if (!img) return;
-            const lo = -img.width - TRAIN_GAP;
-            const period = W - lo;
-            const ahead = TRAIN_START_X + (trainOdo - worldX) * RAIL_PAR;
-            const x = lo + ((((ahead - lo) % period) + period) % period);
-            ctx.drawImage(img, x, deckTop + TRAIN_SINK - TRAIN_WHEELS_Y, img.width, img.height);
-        }
-
-        // Everything behind the street, back to front
         function drawRunBackdrop() {
-            const L = runLayout();
-
-            // Sky: the gradient, oversized so a screen shake never uncovers an edge
-            if (!drawSlot("bg", -20, -20, W + 40, H + 40)) {
-                ctx.fillStyle = "#f7f7f7";
-                ctx.fillRect(-20, -20, W + 40, H + 40);
-            }
-
-            // The sun, in the mirador's old part: SUN_PAR is negative, so this offset
-            // counts DOWN and it drifts right — with the player — barely moving
-            drawStrip("sun", sunX * SUN_PAR + SUN_PHASE, nativeH("sun"), SUN_Y, SUN_GAP);
-
-            // Clouds, three layers, each on its own fraction of the world speed
-            if (!drawCloudLayers(RUN_CLOUD_LAYERS, RUN_CLOUD_LAYERS.map(c => worldX * c.par))) drawClouds();
-
-            // The two skylines, feet on the sidewalk's top edge, behind the bridge
-            const farH = nativeH("skyline_far"), nearH = nativeH("skyline_near");
-            drawTiled("skyline_far", worldX * SKYLINE_FAR_PAR, L.sidewalkTop - farH, farH);
-            drawTiled("skyline_near", worldX * SKYLINE_NEAR_PAR, L.sidewalkTop - nearH, nearH);
-
-            drawBirds();
-            drawTiled("rail", worldX * RAIL_PAR, L.railTop, nativeH("rail"));
-            drawTrain(L.deckTop);
+            // Sky, oversized so a screen shake never uncovers an edge
+            ctx.fillStyle = "#f7f7f7";
+            ctx.fillRect(-20, -20, W + 40, H + 40);
+            drawClouds();
         }
 
-        // The street: the sidewalk (scenery, above the ground line), then the road
-        // the player actually runs on — it starts a little above his feet, which is
-        // what puts him ON the road rather than in front of it.
+        // The ground: a flat band under the running line, plus scrolling speed marks
         function drawRunGround() {
-            const L = runLayout();
-            drawTiled("sidewalk", worldX, L.sidewalkTop, SIDEWALK_H);
-            if (drawTiled("road", worldX, L.roadTop, H - L.roadTop)) return;
-            // Placeholder: the old dino-style line plus scrolling speed marks
+            ctx.fillStyle = "#e2e2e2";
+            ctx.fillRect(-20, GROUND_Y, W + 40, H - GROUND_Y + 20);
             ctx.fillStyle = "#2a2a2a";
             ctx.fillRect(-20, GROUND_Y, W + 40, 3);
             ctx.fillStyle = "#b5b5b5";
-            for (let i = 0; i < 22; i++) {
+            for (let i = 0; i < 14; i++) {
                 const mx = ((i * 104) - (worldX % 104));
-                ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2); // kept above the JUMP = SPACE hint
+                ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2);
             }
         }
 
         /* =====================================================================
-           HOME SCREEN DECOR
-           clouds_1/2, bg_prison all share ONE 1060x618 canvas, so they
-           stack pixel-on-pixel. Draw order: clouds (opaque sky, scrolling) then the
-           prison (its sky is transparent, which is what lets the clouds show), then
-           the characters and the logo.
+           TITLE SCREEN — the forest
+           The still layers back to front (HOME_BACK_LAYERS, the waterfall loop,
+           HOME_FRONT_LAYERS), then what lives in them: falling leaves, the
+           meditating samurai and his katana, the koi. Everything is drawn at its
+           native size on whole pixels, so the pixel art stays crisp.
            ===================================================================== */
 
-        const HOME_DECOR_W = 1060, HOME_DECOR_H = 618;
+        const HOME_SPLASH_T = 0.5;   // how long a koi splash lasts (s)
 
-        // The rect the decor covers on screen: matched on WIDTH and anchored on the
-        // BOTTOM, so the few overflowing pixels are cut off the transparent sky at the
-        // top rather than off the road at the bottom.
-        function homeDecorRect() {
-            const w = W;
-            const h = w * HOME_DECOR_H / HOME_DECOR_W;
-            return { x: 0, y: H - h, w, h };
+        // Draws a slot at its native size with its top-left corner on (x, y), snapped
+        // to whole pixels; flipX / flipY mirror it in place. False if it is missing.
+        function drawNative(slot, x, y, flipX, flipY) {
+            const img = assets[slot];
+            if (!img) return false;
+            x = Math.round(x);
+            y = Math.round(y);
+            if (!flipX && !flipY) {
+                ctx.drawImage(img, x, y);
+                return true;
+            }
+            ctx.save();
+            ctx.translate(x + (flipX ? img.width : 0), y + (flipY ? img.height : 0));
+            ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+            ctx.drawImage(img, 0, 0);
+            ctx.restore();
+            return true;
         }
 
-        // Where the home characters' feet rest
-        function homeGroundY() {
-            const d = homeDecorRect();
-            return d.y + d.h * HOME_GROUND_FRAC;
+        // Native size of a slot, or the fallback while it is missing
+        function slotW(slot, fallback) { return assets[slot] ? assets[slot].width : fallback; }
+        function slotH(slot, fallback) { return assets[slot] ? assets[slot].height : fallback; }
+        function randIn(range) { return rand(range[0], range[1]); }
+
+        // --- The living scene. Set up once at load, then animated on the title
+        //     screen AND during the START sequence, so nothing jumps when START is
+        //     pressed. ---
+        let homeSceneTime = 0;     // the scene's own clock (s)
+        let leaves = [];           // {cx, y, fall, sway, speed, phase} — cx = center of the sway
+        let kois = [];             // the two swimmers: HOME_KOI_SWIMMERS + their direction
+        let koiJump = null;        // the leap in progress {x0, dir, t}, or null
+        let koiJumpWait = 2.5;     // time before the next leap (s) — the first one comes early
+        let splashes = [];         // {x, t}: where the koi broke the water
+
+        function newLeaf(cx, cy) {
+            return {
+                cx, y: cy - slotH("home_leaf", 45) / 2,
+                fall: randIn(HOME_LEAF_FALL), sway: randIn(HOME_LEAF_SWAY),
+                speed: randIn(HOME_LEAF_SWAY_SPEED), phase: 0
+            };
         }
 
-        // Vertical metrics of each home sprite, as fractions of its own frame:
-        //   fill   = how much of the frame height the artwork actually covers
-        //   bottom = transparent padding below the artwork
-        // These let us size every sprite by its CHARACTER height and land its feet on
-        // the ground line, even though the frames have wildly different proportions
-        // (the idle frames are 592x1113, the run frames are 915x915 squares).
-        const HOME_ART = {
-            "idle": { fill: 1.000, bottom: 0.000 },
-            "scared": { fill: 1.000, bottom: 0.000 },
-            "koala_standing": { fill: 0.971, bottom: 0.029 },
-            "car": { fill: 0.547, bottom: 0.227 },
-            "player_run": { fill: 0.966, bottom: 0.000 }, // = the home run loop
-            "koala_running": { fill: 0.979, bottom: 0.021 }  // = the walking koala
-        };
-
-        // The home screen reuses in-game artwork rather than carrying its own copies:
-        // the old home_run_* and home_koala_run_* files were byte-identical duplicates
-        // and are gone, so these two bases point straight at the originals.
-        const HOME_RUN_BASE = "player_run";
-        const HOME_KOALA_BASE = "koala_running";
-        const HOME_KOALA_FRAMES = 2;
-
-        // The police light bar blinks off a wall clock, so it keeps flashing without
-        // interruption across the home screen AND the whole intro sequence.
-        function homeCarSlot() {
-            return "car_" + (Math.floor(performance.now() / 1000 * HOME_CAR_BLINK_FPS) % 2 + 1);
+        function initHomeScene() {
+            leaves = HOME_LEAF_START.map(([cx, cy]) => newLeaf(cx, cy));
+            kois = HOME_KOI_SWIMMERS.map(k => ({ ...k, dir: k.facesRight ? 1 : -1 }));
         }
 
-        // Looks up the metrics for a slot name, stripping any trailing frame number
-        function homeArt(name) {
-            return HOME_ART[name.replace(/_\d+$/, "")] || { fill: 1, bottom: 0 };
+        function updateHomeScene(dt) {
+            homeSceneTime += dt;
+
+            // Leaves: fall, sway, and start over above the screen once they are out
+            for (const l of leaves) {
+                l.y += l.fall * dt;
+                l.phase += l.speed * dt;
+                if (l.y > H) {
+                    Object.assign(l, newLeaf(rand(0, W), 0));
+                    l.y = -slotH("home_leaf", 45);
+                    l.phase = rand(0, Math.PI * 2);
+                }
+            }
+
+            // Swimmers: back and forth between their bounds, turning at each end
+            for (const k of kois) {
+                k.x += k.dir * k.speed * dt;
+                if (k.x > k.max) { k.x = k.max; k.dir = -1; }
+                if (k.x < k.min) { k.x = k.min; k.dir = 1; }
+            }
+
+            // The jumper: waits, leaps out, dives back in — a splash each way
+            if (koiJump) {
+                koiJump.t += dt;
+                if (koiJump.t >= HOME_KOI_JUMP_T) {
+                    splashes.push({ x: koiJump.x0 + koiJump.dir * HOME_KOI_JUMP_DX, t: 0 });
+                    koiJump = null;
+                    koiJumpWait = randIn(HOME_KOI_JUMP_GAP);
+                }
+            } else if ((koiJumpWait -= dt) <= 0) {
+                const zone = HOME_KOI_JUMP_ZONES[Math.floor(Math.random() * HOME_KOI_JUMP_ZONES.length)];
+                const dir = Math.random() < 0.5 ? -1 : 1;
+                // The whole leap stays inside the zone
+                const x0 = dir < 0
+                    ? rand(zone[0] + HOME_KOI_JUMP_DX, zone[1])
+                    : rand(zone[0], zone[1] - HOME_KOI_JUMP_DX);
+                koiJump = { x0, dir, t: 0 };
+                splashes.push({ x: x0, t: 0 });
+            }
+            for (const s of splashes) s.t += dt;
+            splashes = splashes.filter(s => s.t < HOME_SPLASH_T);
         }
 
-        // Draws a home sprite so that its CHARACTER stands charH tall with its feet on
-        // groundY, whatever padding its own frame carries. flip mirrors it horizontally
-        // (used for the koala closing in on the player at the end of a run).
-        function drawHomeSprite(name, cx, groundY, charH, flip) {
+        // Sky, clouds, mountains, forest, the waterfall's current frame, rocks, ground
+        function drawHomeBackdrop() {
+            ctx.fillStyle = "#56dbfd"; // home_sky's own color, also the placeholder while it loads
+            ctx.fillRect(0, 0, W, H);
+            for (const L of HOME_BACK_LAYERS) drawNative(L.slot, L.x, L.y);
+            const f = HOME_WATERFALL.frames;
+            const wf = f[Math.floor(homeSceneTime * HOME_WATERFALL.fps) % f.length];
+            if (wf) drawNative(wf, HOME_WATERFALL.x, HOME_WATERFALL.y);
+            for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x, L.y);
+        }
+
+        // The samurai, meditating on the running line. On the out-breath the rows above
+        // HOME_BREATH_SPLIT are drawn HOME_BREATH_PX lower, over the top row below them:
+        // whole rows moved by whole pixels, nothing is ever resampled.
+        function drawHomeSamurai() {
+            const img = assets["home_samurai"];
+            if (!img) return;
+            const x = HOME_SAMURAI_X, y = GROUND_Y - img.height, s = HOME_BREATH_SPLIT;
+            const out = Math.sin(homeSceneTime * Math.PI * 2 / HOME_BREATH_PERIOD) > 0 ? HOME_BREATH_PX : 0;
+            ctx.drawImage(img, 0, s, img.width, img.height - s, x, y + s, img.width, img.height - s);
+            ctx.drawImage(img, 0, 0, img.width, s, x, y + out, img.width, s);
+        }
+
+        function drawKois() {
+            for (let i = 0; i < kois.length; i++) {
+                const k = kois[i];
+                const bob = Math.round(Math.sin(homeSceneTime * 1.3 + i * 2)); // ±1px
+                drawNative(k.slot, k.x, k.y + bob, (k.dir > 0) !== k.facesRight, false);
+            }
+            const img = assets[HOME_KOI_JUMPER];
+            if (koiJump && img) {
+                const p = koiJump.t / HOME_KOI_JUMP_T;
+                const cx = koiJump.x0 + koiJump.dir * HOME_KOI_JUMP_DX * p;
+                const cy = HOME_KOI_WATER_Y - 4 * HOME_KOI_JUMP_H * p * (1 - p);
+                // The art dives head down-left: mirrored when it leaps right, and upside
+                // down on the way up so it always leaves the water head first
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, W, HOME_KOI_WATER_Y); // nothing of it shows under the water line
+                ctx.clip();
+                drawNative(HOME_KOI_JUMPER, cx - img.width / 2, cy - img.height / 2, koiJump.dir > 0, p < 0.5);
+                ctx.restore();
+            }
+            // Splashes: a few droplets thrown up that fall back into the water
+            ctx.fillStyle = "#e8f8ff";
+            for (const s of splashes) {
+                ctx.globalAlpha = 1 - s.t / HOME_SPLASH_T;
+                for (let i = 0; i < 6; i++) {
+                    const a = Math.PI * (0.15 + 0.7 * i / 5);
+                    const v = 60 + (i % 2) * 35;
+                    const dx = Math.cos(a) * v * s.t;
+                    const dy = -Math.sin(a) * v * s.t + 260 * s.t * s.t;
+                    if (dy < 1) ctx.fillRect(Math.round(s.x + dx), Math.round(HOME_KOI_WATER_Y + dy) - 2, 2, 2);
+                }
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // The whole title-screen scene. actors() draws the START sequence's portals and
+        // gummy in front of the samurai (he runs past him) and behind the koi.
+        function drawHomeScene(actors) {
+            drawHomeBackdrop();
+            const lw = slotW("home_leaf", 40);
+            for (const l of leaves) {
+                // mirrored while it swings back to the left: reads as the leaf turning over
+                drawNative("home_leaf", l.cx + Math.sin(l.phase) * l.sway - lw / 2, l.y, Math.cos(l.phase) < 0, false);
+            }
+            drawHomeSamurai();
+            drawNative("home_katana", HOME_KATANA_X, GROUND_Y - slotH("home_katana", 0));
+            if (actors) actors();
+            drawKois();
+        }
+
+        // --- Standing sprites (the koala of the death sequence) ---
+        // fill = how much of its frame height the artwork covers, bottom = the
+        // transparent padding under it: enough to stand it on the ground at a
+        // given character height, whatever its frame looks like.
+        const STANDING_ART = { "koala_running": { fill: 0.979, bottom: 0.021 } };
+        const KOALA_BASE = "koala_running";
+        const KOALA_FRAMES = 2;
+
+        // Draws a sprite so that its CHARACTER stands charH tall with its feet on
+        // groundY; flip mirrors it horizontally around its own center.
+        function drawStandingSprite(name, cx, groundY, charH, flip) {
             const img = assets[name];
-            const a = homeArt(name);
+            const a = STANDING_ART[name.replace(/_\d+$/, "")] || { fill: 1, bottom: 0 };
             if (!img) {
                 // Placeholder block, same footprint as the real character would have
                 const w = charH * 0.55;
@@ -2194,7 +2000,7 @@
             if (flip) {
                 ctx.save();
                 ctx.translate(cx, 0);
-                ctx.scale(-1, 1);                            // mirror around the sprite's own center
+                ctx.scale(-1, 1);
                 ctx.drawImage(img, -frameW / 2, top, frameW, frameH);
                 ctx.restore();
             } else {
@@ -2203,39 +2009,13 @@
             return true;
         }
 
-        // Picks the current frame of a numbered home loop (idle_1..4, etc.)
-        function homeLoopFrame(base, count, fps, t) {
+        // Picks the current frame of a numbered loop (koala_running_1..2, etc.)
+        function loopFrame(base, count, fps, t) {
             return base + "_" + (Math.floor(t * fps) % count + 1);
         }
 
-        // The endless cloud strip: the two tiles are opaque sky and seam perfectly in
-        // either order, so they alternate 1,2,1,2... and scroll as one strip.
-        function drawHomeClouds() {
-            const d = homeDecorRect();
-            const period = d.w * 2;
-            const off = -(((cloudScroll % period) + period) % period);
-            let i = 0;
-            for (let x = off; x < W; x += d.w, i++) {
-                const slot = (i % 2 === 0) ? "clouds_1" : "clouds_2";
-                if (!drawSlot(slot, x, d.y, d.w, d.h)) {
-                    ctx.fillStyle = "#bfe2f5"; // placeholder sky
-                    ctx.fillRect(x, d.y, d.w, d.h);
-                }
-            }
-        }
-
-        // Clouds + prison, the static part of the home screen
-        function drawHomeBackdrop() {
-            drawHomeClouds();
-            const d = homeDecorRect();
-            if (!drawSlot("bg_prison", d.x, d.y, d.w, d.h)) {
-                ctx.fillStyle = "#9a9a94"; // placeholder wall
-                ctx.fillRect(d.x, d.y + d.h * 0.25, d.w, d.h * 0.75);
-            }
-        }
-
         // The FULL SEND logo: slides down from above on arrival, then bobs gently in
-        // place for as long as we sit on the title screen.
+        // place. Until a logo.png exists, the title is chunky pixel text.
         function drawHomeLogo() {
             const slide = Math.min(1, homeTime / TITLE_SLIDE_DURATION);
             const ease = 1 - (1 - slide) * (1 - slide);
@@ -2245,13 +2025,10 @@
             const cy = -HOME_LOGO_H + ease * (HOME_LOGO_Y + HOME_LOGO_H) + bob;
             const h = HOME_LOGO_H, w = h * slotAspect("logo");
             if (!drawSlot("logo", W / 2 - w / 2, cy - h / 2, w, h)) {
-                ctx.textAlign = "center";
-                ctx.fillStyle = "#2a2a2a";
-                ctx.font = "bold 52px monospace";
-                ctx.fillText("FULL SEND", W / 2, cy + 16);
+                drawPixelText("FULL SEND", W / 2 + 5, cy + 5, 16, 5, MENU_SHADOW);
+                drawPixelText("FULL SEND", W / 2, cy, 16, 5, "#ffffff");
             }
         }
-
         // LOADING progress, 0..1: the real image loading, but never faster than
         // LOADING_MIN_T so the screen doesn't just blink past
         function loadingProgress() {
@@ -2303,47 +2080,41 @@
         // Title screen. BEST + START / LEADERBOARD only show up once everything else
         // is in place (see homeReady), and fade in over HOME_MENU_FADE_T.
         function drawHome() {
-            drawHomeBackdrop();
+            drawHomeScene(null);
             drawHomeLogo();
-
-            // The police car is already parked when the title screen comes up, and its
-            // light bar blinks continuously — it keeps blinking right through the intro
-            // sequence and up to the moment the run actually starts.
-            drawHomeSprite(homeCarSlot(), W * HOME_CAR_FRAC, homeGroundY(), HOME_CAR_H, false);
-
-            // The red character, idle: he holds his wads of cash and glances around.
-            // idle_1..4 is a slow 4-frame loop.
-            drawHomeSprite(
-                homeLoopFrame("idle", 4, HOME_IDLE_FPS, homeTime),
-                W * HOME_CHAR_FRAC, homeGroundY(), HOME_CHAR_H, false
-            );
 
             if (homeReady()) {
                 ctx.globalAlpha = Math.min(1, homeMenuTime / HOME_MENU_FADE_T);
-                ctx.fillStyle = "#404040";
-                ctx.font = "15px monospace";
+                ctx.font = "bold 16px monospace";
                 ctx.textAlign = "center";
-                ctx.fillText("BEST " + String(bestScore).padStart(5, "0"), W / 2, HOME_MENU_Y[0] - 36);
-                drawMenu(["START GAME", "LEADERBOARD"], HOME_MENU_Y, menuIndexHome, "#2a2a2a");
+                const best = "BEST " + String(bestScore).padStart(5, "0");
+                ctx.fillStyle = MENU_SHADOW;
+                ctx.fillText(best, W / 2 + 2, HOME_MENU_Y[0] - 36 + 2);
+                ctx.fillStyle = "#ffffff";
+                ctx.fillText(best, W / 2, HOME_MENU_Y[0] - 36);
+                drawMenu(["START GAME", "LEADERBOARD"], HOME_MENU_Y, menuIndexHome, "#ffffff", MENU_SHADOW);
                 ctx.globalAlpha = 1;
             }
 
-            drawControlsHint(H - 34, "#909090");
+            drawControlsHint(H - 34, "#ffffff");
         }
 
-        // Shared menu renderer: highlights the selected row
-        function drawMenu(items, rowsY, selected, color) {
+        // Shared menu renderer: highlights the selected row. shadow (optional) puts a
+        // drop shadow under every label, for text sitting on busy art.
+        function drawMenu(items, rowsY, selected, color, shadow) {
             ctx.textAlign = "center";
             for (let i = 0; i < items.length; i++) {
                 const isSel = i === selected;
                 ctx.font = isSel ? "bold 30px monospace" : "24px monospace";
-                ctx.fillStyle = isSel ? "#ff3020" : color;
-                ctx.fillText(items[i], W / 2, rowsY[i]); // the label itself stays perfectly centered
-                if (isSel) {
+                const tw = ctx.measureText(items[i]).width;
+                const row = (d, fill) => {
+                    ctx.fillStyle = fill;
+                    ctx.fillText(items[i], W / 2 + d, rowsY[i] + d); // the label itself stays perfectly centered
                     // selection arrow drawn separately so it doesn't shift the label
-                    const tw = ctx.measureText(items[i]).width;
-                    ctx.fillText(">", W / 2 - tw / 2 - 26, rowsY[i]);
-                }
+                    if (isSel) ctx.fillText(">", W / 2 - tw / 2 - 26 + d, rowsY[i] + d);
+                };
+                if (shadow) row(2, shadow);
+                row(0, isSel ? "#ff3020" : color);
             }
         }
 
@@ -2373,75 +2144,83 @@
             ctx.globalAlpha = 1;
         }
 
-        // INTRO cinematic: the character walks in with his gear, bumps the cactus,
-        // loses everything (that's why the in-game runner is bare), sprints off, and
-        // a black wipe brings the actual run in. Press = skip.
-        // The scripted home sequence. Same page as HOME (clouds, prison, logo), only
-        // the menu is gone:
-        //   1. the koala cop rolls in from the right, the runner still idles
-        //   2. the koala plants himself and stands there
-        //   3. the runner panics (scared)
-        //   4. he bolts off to the right, a black wipe closes, the run begins
+        /* ---------------------------------------------------------------------
+           START SEQUENCE — same forest, the menu gone. A portal opens on the left,
+           the gummy runs out of it, in front of the meditating samurai, into the
+           portal on the right; both close, fade to black, the run starts.
+           The gummy is clipped to the space BETWEEN the two portal centers: that
+           is what makes him come out of the first one and vanish into the second.
+           --------------------------------------------------------------------- */
+
+        function gummyWidth() { return slotW(playerSpritePrefix() + "_run_1", 74); }
+        function gummyRunSlot(t) { return playerSpritePrefix() + "_run_" + (Math.floor(t * ANIM_FPS) % runFrameCount() + 1); }
+
+        // 0..1 size of a portal: opens from openAt, closes from closeAt
+        function portalScale(t, openAt, closeAt) {
+            const open = (t - openAt) / PORTAL_OPEN_T;
+            const close = 1 - (t - closeAt) / PORTAL_OPEN_T;
+            return Math.max(0, Math.min(1, open, close));
+        }
+
+        // A portal standing on the running line: native size once open, scaled around
+        // its center while it opens / closes (no smoothing, so it stays pixelated)
+        function drawPortal(cx, s) {
+            if (s <= 0) return;
+            const img = assets["portal"];
+            const pw = img ? img.width : 100, ph = img ? img.height : 156;
+            const cy = GROUND_Y + PORTAL_SINK - ph / 2;
+            if (!img) {
+                ctx.fillStyle = "#5a2ab0"; // placeholder: a purple oval
+                ctx.beginPath();
+                ctx.ellipse(cx, cy, pw / 2 * s, ph / 2 * s, 0, 0, Math.PI * 2);
+                ctx.fill();
+                return;
+            }
+            if (s >= 1) { drawNative("portal", cx - pw / 2, cy - ph / 2); return; }
+            ctx.drawImage(img, Math.round(cx - pw * s / 2), Math.round(cy - ph * s / 2), Math.round(pw * s), Math.round(ph * s));
+        }
+
         function drawIntro() {
             const tl = introTimeline();
             const t = introTime;
-            const groundY = homeGroundY();
 
-            drawHomeBackdrop();
+            drawHomeScene(() => {
+                drawPortal(PORTAL_LEFT_X, portalScale(t, 0, tl.leftClose));
+                drawPortal(PORTAL_RIGHT_X, portalScale(t, tl.rightOpen, tl.arrive));
+                if (t < tl.run || t >= tl.arrive) return;
+                const rt = t - tl.run;
+                const x = PORTAL_LEFT_X - gummyWidth() + INTRO_GUMMY_SPEED * rt;
+                const slot = gummyRunSlot(rt);
+                // Only one run frame so far: a little hop stands in for the legs
+                const hop = runFrameCount() === 1
+                    ? Math.round(Math.abs(Math.sin(rt * Math.PI * INTRO_GUMMY_HOP_HZ)) * INTRO_GUMMY_HOP_PX) : 0;
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(PORTAL_LEFT_X, 0, PORTAL_RIGHT_X - PORTAL_LEFT_X, H);
+                ctx.clip();
+                if (!drawNative(slot, x, GROUND_Y - slotH(slot, 0) - hop)) {
+                    ctx.fillStyle = "#e01010"; // placeholder gummy
+                    ctx.fillRect(Math.round(x), GROUND_Y - PLAYER_H - hop, PLAYER_W, PLAYER_H);
+                }
+                ctx.restore();
+            });
             drawHomeLogo();
 
-            // The parked police car, still blinking on the same wall clock as on the title
-            // screen, so the light bar never stutters when the sequence takes over.
-            drawHomeSprite(homeCarSlot(), W * HOME_CAR_FRAC, groundY, HOME_CAR_H, false);
-
-            // --- The koala cop: he walks RIGHT to LEFT and stops roughly facing the
-            // runner, well clear of the car. The artwork already faces left, which is his
-            // direction of travel, so it is drawn as-is — no mirroring here. ---
-            const koalaFrom = W * HOME_KOALA_START_FRAC;
-            const koalaTo = W * HOME_KOALA_STOP_FRAC;
-            let koalaX, koalaSlot;
-            if (t < tl.koalaIn) {
-                const p = t / tl.koalaIn;
-                const ease = 1 - (1 - p) * (1 - p);            // decelerating arrival
-                koalaX = koalaFrom + (koalaTo - koalaFrom) * ease;
-                koalaSlot = homeLoopFrame(HOME_KOALA_BASE, HOME_KOALA_FRAMES, HOME_KOALA_FPS, t);
-            } else {
-                // Planted in front of him, holding up his warrant
-                koalaX = koalaTo;
-                koalaSlot = "koala_standing";
-            }
-            drawHomeSprite(koalaSlot, koalaX, groundY, HOME_KOALA_H, false);
-
-            // --- The red character ---
-            const charX0 = W * HOME_CHAR_FRAC;
-            if (t < tl.koalaStop) {
-                // Still idling, unaware
-                drawHomeSprite(homeLoopFrame("idle", 4, HOME_IDLE_FPS, homeTime + t),
-                    charX0, groundY, HOME_CHAR_H, false);
-            } else if (t < tl.scared) {
-                // Frozen in panic
-                drawHomeSprite("scared", charX0, groundY, HOME_CHAR_H, false);
-            } else {
-                // Sprinting off to the right, at the SAME size he will have in game
-                const rt = t - tl.scared;
-                const x = charX0 + HOME_RUNOUT_SPEED * rt;
-                drawHomeSprite(homeLoopFrame(HOME_RUN_BASE, runFrameCount(), HOME_RUN_FPS, rt),
-                    x, groundY, HOME_CHAR_H, false);
-            }
-
-            ctx.fillStyle = "#404040";
-            ctx.font = "14px monospace";
             ctx.textAlign = "center";
+            ctx.font = "14px monospace";
+            ctx.fillStyle = MENU_SHADOW;
+            ctx.fillText("press to skip", W / 2 + 1, H - 15);
+            ctx.fillStyle = "#ffffff";
             ctx.fillText("press to skip", W / 2, H - 16);
 
-            // Black wipe sliding in from the right just before the game starts
-            if (t >= tl.wipe) {
-                const p = Math.min(1, (t - tl.wipe) / HOME_WIPE_T);
+            // Fade to black once both portals have closed
+            if (t >= tl.fade) {
+                ctx.globalAlpha = Math.min(1, (t - tl.fade) / INTRO_FADE_T);
                 ctx.fillStyle = "#000";
-                ctx.fillRect(W - p * W, 0, p * W, H);
+                ctx.fillRect(0, 0, W, H);
+                ctx.globalAlpha = 1;
             }
         }
-
         // Death sequence, in two beats:
         //
         //   beat 1  (0 -> DEATH_CATCH_FRAC)
@@ -2474,15 +2253,15 @@
                 const kp = p / DEATH_CATCH_FRAC;
                 const kEase = kp * (0.75 + 0.25 * kp);       // steady charge, closing a little faster
                 const koalaX = W * DEATH_KOALA_FROM + (cx - W * DEATH_KOALA_FROM) * kEase;
-                const koalaSlot = homeLoopFrame(HOME_KOALA_BASE, HOME_KOALA_FRAMES, HOME_KOALA_FPS, elapsed);
+                const koalaSlot = loopFrame(KOALA_BASE, KOALA_FRAMES, DEATH_KOALA_FPS, elapsed);
                 // Running RIGHT, against the artwork's own facing => mirrored
-                drawHomeSprite(koalaSlot, koalaX, GROUND_Y, DEATH_KOALA_H, true);
+                drawStandingSprite(koalaSlot, koalaX, GROUND_Y, DEATH_KOALA_H, true);
 
-                // The runner, thrown and motionless. player_hurt is centered in its
-                // square, so it hangs off the hitbox CENTER rather than off the feet.
+                // The runner, thrown and motionless: gummy_hurt hangs off the hitbox
+                // CENTER rather than off the feet.
                 const hurt = assets[playerSpritePrefix() + "_hurt"];
                 if (hurt) {
-                    const h = PLAYER_SPRITE_H, w = h * (hurt.width / hurt.height);
+                    const h = hurt.height, w = hurt.width;
                     ctx.drawImage(hurt, cx - w / 2, feetY - PLAYER_H / 2 - h / 2, w, h);
                 } else {
                     ctx.fillStyle = "#c03030";
@@ -2501,7 +2280,7 @@
             const dieImg = assets["gameover_player_" + f];
             if (dieImg) {
                 // Same fixed height for every frame, anchored on the player's feet line
-                const h = PLAYER_SPRITE_H * 1.25, w = h * (dieImg.width / dieImg.height);
+                const h = GAMEOVER_FRAME_H, w = h * (dieImg.width / dieImg.height);
                 ctx.drawImage(dieImg, cx - w / 2, feetY - h, w, h);
             } else {
                 const size = PLAYER_W * (1 + Math.sin(tail * Math.PI * 6) * 0.15);
@@ -2581,13 +2360,13 @@
             ctx.textAlign = "center";
             ctx.fillStyle = "#ff3020";
             ctx.font = "bold 40px monospace";
-            ctx.fillText("LEADERBOARD", W / 2, 73);
+            ctx.fillText("LEADERBOARD", W / 2, 81);
 
             // Score of the run that just ended (the flow lands here right after a death)
             if (score > 0) {
                 ctx.fillStyle = "#f0e0d0";
                 ctx.font = "bold 19px monospace";
-                ctx.fillText("LAST RUN  " + Math.floor(score), W / 2, 104);
+                ctx.fillText("LAST RUN  " + Math.floor(score), W / 2, 115);
             }
 
             // 10 rows: rank, name, score (the player's row is highlighted).
@@ -2603,13 +2382,13 @@
             ctx.font = "23px monospace";
             for (let i = 0; i < rows.length; i++) {
                 const r = rows[i];
-                const y = 137 + i * 41;
+                const y = 152 + i * 45;
                 ctx.fillStyle = r.you ? "#ffd040" : "#f0e0d0";
                 ctx.textAlign = "left";
-                ctx.fillText(String(i + 1).padStart(2, " ") + ".", 264, y);
-                ctx.fillText(r.name, 330, y);
+                ctx.fillText(String(i + 1).padStart(2, " ") + ".", 303, y);
+                ctx.fillText(r.name, 378, y);
                 ctx.textAlign = "right";
-                ctx.fillText(String(r.score).padStart(6, " "), 727, y);
+                ctx.fillText(String(r.score).padStart(6, " "), 834, y);
             }
 
             // Character on the right, picked from the player's rank on the board:
@@ -2623,7 +2402,7 @@
             else if (youRank >= 5) tierName = "leaderboard_player_1";
 
             const t = performance.now() / 1000;
-            const cx = W * 0.82, cy = 355;
+            const cx = W * 0.82, cy = 394;
             const chH = 213, chW = chH * slotAspect(tierName);
             // Animations by tier: _1 and _3 bob up and down (like the home idle);
             // _2 and _4 "dance" by mirroring left<->right at least every second.
@@ -2660,7 +2439,7 @@
                     ctx.textAlign = "center";
                     ctx.fillStyle = "#ffd040";
                     ctx.font = "bold 21px monospace";
-                    ctx.fillText(msg, W / 2, 542);
+                    ctx.fillText(msg, W / 2, 601);
                 }
             }
 
@@ -2881,6 +2660,7 @@
         }
 
         resetRun();          // so a valid world exists before the first run starts
+        initHomeScene();     // the title screen's leaves and koi
         updateDesktopGate(); // decide up front whether this device gets the game at all
         requestAnimationFrame(loop);
     </script>
