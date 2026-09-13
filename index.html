@@ -263,15 +263,18 @@
 
         // --- Player hitbox (NEVER changes during a run, only visuals change) ---
         const PLAYER_X = 130;              // fixed horizontal position of the player (~12% from the left)
-        const PLAYER_W = 70;               // hitbox width (px) — gummy_run_1 is 74 wide
-        const PLAYER_H = 115;              // hitbox height (px) — the whole gummy_run_1 frame, its ground
-        // shadow included, so the image's bottom row sits on GROUND_Y like the samurai's
+        const PLAYER_W = 48;               // hitbox width (px) — the gummy's body; the swinging arms
+        // and legs of the run frames stick out of it
+        const PLAYER_H = 88;               // hitbox height (px) — the gummy_run_* frame height: its bottom
+        // row (the feet) sits on GROUND_Y like the samurai's
         const HITBOX_PAD = 7;              // collision forgiveness: hitbox is shrunk by this on each side (px)
 
         // --- Player sprites: the red gummy (gummy_run_1..N, gummy_jump, ...) ---
         // Pixel art, drawn at its NATIVE size, feet on the bottom of the hitbox.
-        const ANIM_FPS = 10;               // speed of the run / hold animation loops (frames per second)
-        const RUN_FRAME_COUNT = 4;         // most gummy_run_* frames looked for
+        const RUN_FPS = 24;                // run cycle speed (frames per second): 30 frames = 1.25s
+        const RUN_FRAME_COUNT = 30;        // gummy_run_1..30 — they share one canvas, feet on its bottom
+        // edge and head at the same x, so they play back without any jitter
+        const ANIM_FPS = 10;               // speed of the hold (jetpack) animation loop (frames per second)
         const HOLD_FRAME_COUNT = 3;        // number of gummy_hold_* frames
         const DEBUG_HITBOX = true;         // true = draw the real collision box over the sprite (alignment check)
         // gummy_hurt is the one exception: the character is thrown through the air, so
@@ -444,9 +447,9 @@
             "logo",
             // START sequence
             "portal",
-            // Player: the red gummy. Only gummy_run_1 exists so far — the others fall
-            // back to it (run loop) or to the placeholder until they are drawn.
-            "gummy_run_1", "gummy_run_2", "gummy_run_3", "gummy_run_4",
+            // Player: the red gummy. The run cycle (gummy_run_1..RUN_FRAME_COUNT) is in;
+            // the other states fall back to the run frame until they are drawn.
+            ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => "gummy_run_" + (i + 1)),
             "gummy_hold_1", "gummy_hold_2", "gummy_hold_3",
             "gummy_jump", "gummy_doublejump", "gummy_hurt",
             // Obstacles (2 animation frames each)
@@ -1684,12 +1687,11 @@
                 if (player.jumpsUsed >= 2) return pre + "_doublejump"; // after the 2nd jump
                 return pre + "_jump";                                  // first jump / simple fall
             }
-            const f = Math.floor(runTime * ANIM_FPS) % runFrameCount() + 1;
+            const f = Math.floor(runTime * RUN_FPS) % runFrameCount() + 1;
             return pre + "_run_" + f; // running on the ground
         }
 
-        // Run frames actually delivered. A loop with fewer frames than RUN_FRAME_COUNT
-        // (only gummy_run_1 so far) simply cycles over what exists; none = placeholder.
+        // Run frames actually delivered: the loop cycles over what exists (none = placeholder).
         function runFrameCount() {
             let n = 0;
             while (n < RUN_FRAME_COUNT && assets[playerSpritePrefix() + "_run_" + (n + 1)]) n++;
@@ -2193,7 +2195,7 @@
            --------------------------------------------------------------------- */
 
         function gummyWidth() { return slotW(playerSpritePrefix() + "_run_1", 74); }
-        function gummyRunSlot(t) { return playerSpritePrefix() + "_run_" + (Math.floor(t * ANIM_FPS) % runFrameCount() + 1); }
+        function gummyRunSlot(t) { return playerSpritePrefix() + "_run_" + (Math.floor(t * RUN_FPS) % runFrameCount() + 1); }
 
         // 0..1 size of a portal: opens from openAt, closes from closeAt
         function portalScale(t, openAt, closeAt) {
