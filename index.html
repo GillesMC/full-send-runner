@@ -25,7 +25,13 @@
             justify-content: center;
         }
 
-        canvas {
+        /* The screen: the game canvas, with its backlight glowing behind it */
+        #screen {
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        #game {
             /* Display size: the FIRST value below — 40vw = 40% of the window's width
                (1920-wide window -> 768x432). It follows the window when it is
                resized, always 16:9. The calc() only stops it from overflowing a
@@ -34,10 +40,27 @@
             width: min(40vw, calc(100vh * 16 / 9));
             height: auto;
             aspect-ratio: 16 / 9;
-            flex-shrink: 0;
             display: block;
+            position: relative;   /* drawn above #glow */
             image-rendering: pixelated;
             outline: none;
+            /* ARCADE LOOK — brightness, contrast and color punch of the whole picture
+               (1 = untouched). Display only: the art files are not changed. */
+            filter: brightness(1.12) contrast(1.08) saturate(1.25);
+        }
+
+        /* BACKLIGHT — a tiny live copy of the screen, blown up and blurred behind it:
+           the game's own colors glow out onto the black around it, as if the light
+           came from behind the screen. */
+        #glow {
+            position: absolute;
+            left: -12%;           /* left/top = -(width - 100%) / 2, to stay centered */
+            top: -12%;
+            width: 124%;          /* how far the glow spreads past the screen */
+            height: 124%;
+            filter: blur(48px) saturate(1.6) brightness(1.1); /* softness, color, strength */
+            opacity: 0.7;         /* 0 = no glow, 1 = full */
+            pointer-events: none;
         }
 
         /* --- Desktop gate: shown instead of the game on phones and tablets
@@ -111,8 +134,11 @@
         </div>
     </div>
 
-    <!-- The game screen: 1280x720, the art is drawn on it 1:1 -->
-    <canvas id="game" width="1280" height="720"></canvas>
+    <!-- The game screen (1280x720, the art is drawn on it 1:1) and its backlight -->
+    <div id="screen">
+        <canvas id="glow" width="160" height="90"></canvas>
+        <canvas id="game" width="1280" height="720"></canvas>
+    </div>
 
     <!-- Supabase client library (online leaderboard). If this fails to load,
      the game detects it and runs fully offline as before. -->
@@ -387,6 +413,11 @@
 
         const canvas = document.getElementById("game");
         const ctx = canvas.getContext("2d");
+        // Backlight (#glow in the CSS): a 160x90 copy of every frame, which the CSS blows
+        // up and blurs behind the screen
+        const glow = document.getElementById("glow");
+        const glowCtx = glow.getContext("2d");
+        const screenEl = document.getElementById("screen"); // the screen + its backlight
 
         // F toggles fullscreen
         window.addEventListener("keydown", (e) => {
@@ -425,7 +456,7 @@
         function updateDesktopGate() {
             blocked = !isDesktop();
             gate.hidden = !blocked;
-            canvas.style.visibility = blocked ? "hidden" : "visible";
+            screenEl.style.visibility = blocked ? "hidden" : "visible";
             if (blocked) releaseButton(); // never leave the jump button stuck down
         }
         window.addEventListener("resize", updateDesktopGate);
@@ -2703,6 +2734,7 @@
             if (!blocked) {
                 update(dt);
                 draw();
+                glowCtx.drawImage(canvas, 0, 0, glow.width, glow.height); // feed the backlight
             }
             requestAnimationFrame(loop);
         }
