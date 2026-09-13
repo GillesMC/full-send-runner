@@ -26,9 +26,12 @@
         }
 
         canvas {
-            /* Always exactly 1280x720, whatever the window size: the rest stays black */
-            width: 1280px;
-            height: 720px;
+            /* 1280x720 at most; in a smaller window it shrinks with it, always 16:9
+               (the smaller of: 1280px, the window's width, the width the window's
+               height allows). The rest of the window stays black. */
+            width: min(1280px, 100vw, calc(100vh * 16 / 9));
+            height: auto;
+            aspect-ratio: 16 / 9;
             flex-shrink: 0;
             display: block;
             image-rendering: pixelated;
@@ -122,8 +125,9 @@
 
         // --- Screen ---
         // The game screen is 1280x720 (16:9). The canvas IS the screen: the art is
-        // drawn on it 1:1 and it is shown at exactly 1280x720, centered, whatever the
-        // window size — the rest of the page stays black (see the canvas CSS).
+        // drawn on it 1:1. It is shown at 1280x720 at most, and shrinks with a smaller
+        // window, always 16:9, centered — the rest of the page stays black (see the
+        // canvas CSS).
         const W = 1280;                    // must match the <canvas> tag
         const H = 720;
         const LOADING_MIN_T = 1.4;         // the LOADING screen stays up at least this long (s)
