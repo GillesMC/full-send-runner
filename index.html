@@ -26,12 +26,12 @@
         }
 
         canvas {
-            /* Base (max) display width: the FIRST value below — 1024px = 1024x576.
-               The game is still 1280x720 inside; this is only how big it is shown.
-               In a smaller window it shrinks with it, always 16:9 (the smaller of:
-               that value, the window's width, the width the window's height allows).
-               The rest of the window stays black. */
-            width: min(960px, 100vw, calc(100vh * 16 / 9));
+            /* Display size: the FIRST value below — 40vw = 40% of the window's width
+               (1920-wide window -> 768x432). It follows the window when it is
+               resized, always 16:9. The calc() only stops it from overflowing a
+               very wide, very short window. The game is still 1280x720 inside;
+               this is only how big it is shown. The rest stays black. */
+            width: min(40vw, calc(100vh * 16 / 9));
             height: auto;
             aspect-ratio: 16 / 9;
             flex-shrink: 0;
