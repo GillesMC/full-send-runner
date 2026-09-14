@@ -200,17 +200,17 @@
         const HOME_WATER_DARK = "rgba(0,70,95,0.22)";      // shadow streaks
         const HOME_WATER_FLOWS = {
             // dir: "down" = vertical streaks pouring down, "flow" = short ripples carried
-            // downstream, "side" = ripples drifting sideways and twinkling.
+            // down (under the log), "side" = ripples drifting left to right and twinkling.
             // density = streaks per px² of zone, len / speed = ranges (px, px/s), light = share of highlights
             fall: { dir: "down", density: 0.02, len: [6, 18], speed: [80, 140], light: 0.4 },
-            stream: { dir: "flow", density: 0.004, len: [3, 9], speed: [25, 45], light: 0.5 },
+            stream: { dir: "flow", density: 0.005, len: [3, 9], speed: [6, 14], light: 0.5 }, // same pace as the pond
             ripple: { dir: "side", density: 0.0025, len: [4, 14], speed: [4, 12], light: 0.7 }
         };
         const HOME_WATER_ZONES = [
             { x: 1100, y: 255, w: 72, h: 185, flow: "fall" },     // the waterfall
-            { x: 1025, y: 485, w: 95, h: 55, flow: "ripple" },    // the pool under the bridge
-            { x: 1000, y: 540, w: 280, h: 180, flow: "stream" },  // the stream under the log
-            { x: 0, y: 645, w: 1000, h: 75, flow: "ripple" }      // the pond
+            { x: 1025, y: 485, w: 100, h: 53, flow: "ripple" },   // the pool under the bridge, above the log
+            { x: 1095, y: 578, w: 135, h: 67, flow: "stream" },   // under the log, between the two rocks: flows down
+            { x: 0, y: 645, w: 1280, h: 75, flow: "ripple" }      // past the rocks: the whole pond, one current, left to right
         ];
         // The samurai and his katana sit ON the running line (GROUND_Y): only x is set here
         const HOME_SAMURAI_X = 208;        // left edge (px)
