@@ -162,38 +162,34 @@
         const LOADING_HOLD_T = 0.25;       // "100%" stays on screen this long before the home screen (s)
 
         // --- Title screen: the forest ---
-        // Every home_* image is pixel art drawn 1:1 on the 1280x720 screen, at its
-        // native size — never scaled. Photoshop's layer export trims each file to its
-        // own pixels, so each one gets back the top-left corner it had in the PSD:
-        // measured pixel by pixel against home_forest for rocks / ground / waterfall,
-        // read off the demo render for the clouds. Listed back to front.
+        // Everything comes from "Master Home Screen.psd": each image is named after its
+        // layer and keeps its PSD position and blend mode. Most layers are exported at
+        // the full 1280x720 canvas, so they are drawn at (0, 0); the few trimmed ones
+        // (tobi, samuraï, eye) carry their PSD position. Pixel art drawn 1:1, never
+        // scaled. Listed back to front.
         // drift = the clouds creep right to left (px/s, the furthest one slowest) and come
-        // back in from the right once fully gone. home_cloud_1's right edge was cut
-        // by the PSD canvas (rows 354..456), but those rows always stay behind the
-        // opaque mountains, so the cut never shows. leavesBehind = the far falling
-        // leaves are drawn right before this layer, so they vanish behind it.
+        // back in from the right once fully gone. blend = the layer's PSD blend mode.
+        // leavesBehind = the far falling leaves are drawn right before this layer, so
+        // they vanish behind it.
         const HOME_BACK_LAYERS = [
-            { slot: "home_sky", x: 0, y: 0 },
-            { slot: "home_cloud_4", x: 20, y: 150, drift: 1.5 },
-            { slot: "home_cloud_3", x: 190, y: 140, drift: 2 },
-            { slot: "home_cloud_2", x: 400, y: 165, drift: 2.5 },
-            { slot: "home_cloud_1", x: 127, y: 0, drift: 3 },
-            { slot: "home_mountains", x: 0, y: 0 },
-            { slot: "home_forest", x: 0, y: 0, leavesBehind: true } // trees, pagoda, bridge, pond
+            { slot: "sky" },
+            { slot: "cloud_4", drift: 1.5 },
+            { slot: "cloud_3", drift: 2 },
+            { slot: "cloud_2", drift: 2.5 },          // its 50% opacity is baked into the file
+            { slot: "cloud_1", drift: 3 },
+            { slot: "landscape" },                    // the mountains
+            { slot: "tobi", x: 981, y: 113, blend: "hard-light" }, // the kite by the pagoda (Lumière crue)
+            { slot: "background", leavesBehind: true } // trees, pagoda, waterfall, bridge
         ];
-        // The waterfall's frame 1 is the one painted in home_forest; frames 2 and 3
-        // are drawn over it, so the loop is forest / 2 / 3.
-        // TEST: set aside (useFrames: false) — the water is animated by code instead
-        // (HOME_WATER_* below). true = back to the drawn frames.
-        const HOME_WATERFALL = { x: 1103, y: 258, fps: 3, frames: [null, "home_waterfall_2", "home_waterfall_3"], useFrames: false };
         const HOME_FRONT_LAYERS = [
-            { slot: "home_rocks", x: 1, y: 373 },
-            { slot: "home_ground", x: 0, y: 530 }     // the grass ledge (running line) + the water
+            { slot: "rocks" },
+            { slot: "front" }                         // the grass ledge (running line) + the pond
         ];
-        // WATER, animated by code (test). home_water_mask.png marks, pixel for pixel,
-        // which pixels of the forest are water (white = water — it can be repainted in
-        // Photoshop). The code draws moving light and dark streaks, keeps only what
-        // falls inside the mask, and lays that over the art: the drawing never changes.
+        // WATER, animated by code. water_mask.png marks, pixel for pixel, which pixels
+        // of the forest are water (white = water — it can be repainted in Photoshop; the
+        // pool under the bridge is exactly river.png). The code draws moving light and
+        // dark streaks, keeps only what falls inside the mask, and lays that over the
+        // art: the drawing never changes.
         // Each zone has its own flow; a flow's streaks are fixed random seeds.
         const HOME_WATER_FPS = 12;         // the pattern steps this many times per second (retro, not smooth)
         const HOME_WATER_LIGHT = "rgba(235,252,255,0.55)"; // highlight streaks
@@ -212,39 +208,45 @@
             { x: 1095, y: 578, w: 135, h: 67, flow: "stream" },   // under the log, between the two rocks: flows down
             { x: 0, y: 645, w: 1280, h: 75, flow: "ripple" }      // past the rocks: the whole pond, one current, left to right
         ];
-        // The samurai and his katana sit ON the running line (GROUND_Y): only x is set here
-        const HOME_SAMURAI_X = 208;        // left edge (px)
-        const HOME_KATANA_X = 383;         // left edge (px)
+        // The samurai (samuraï.png, trimmed) at his PSD spot; katana.png is full-canvas.
+        const HOME_SAMURAI = { x: 185, y: 346 };
         // He meditates, barely moving: on every out-breath his head and shoulders sink
         // one pixel (the rows above HOME_BREATH_SPLIT slide down over the row below).
         const HOME_BREATH_PX = 1;          // 0 = perfectly still
-        const HOME_BREATH_SPLIT = 120;     // first row of home_samurai that never moves (hakama)
+        const HOME_BREATH_SPLIT = 146;     // first row of samuraï.png that never moves (top of the hakama)
         const HOME_BREATH_PERIOD = 4.5;    // one full breath (s)
-        // Falling leaves: home_leaf drifting down and swaying, mirrored each time the
-        // sway turns back (pixel-perfect flip, no rotation). Two depths: FRONT leaves
-        // fall in front of the whole forest; FAR ones are smaller and slower and fall
-        // BEHIND home_forest (only seen through the gaps in the trees). Sizes are
-        // whole-pixel, nearest-neighbour reductions of home_leaf. They start where the
-        // demo render has them (+ a few far ones), then respawn above the screen.
-        const HOME_LEAF_START = [          // front leaf centers on the first frame (px)
-            [233, 210], [128, 348], [150, 465], [500, 333], [612, 187],
-            [632, 382], [503, 478], [1218, 415], [978, 600]
+        // His open eye (eye.png = the PSD's "Oeil" layer): he peeks at the gummy while it
+        // runs past him in the START sequence. HOME_EYE_ALWAYS = true keeps it open, as in the PSD.
+        const HOME_EYE = { x: 333, y: 411 };
+        const HOME_EYE_ALWAYS = false;
+        const HOME_EYE_RANGE = [130, 560]; // he peeks while the gummy's center is in this x range (px)
+        // Falling leaves: leaf_1 (and now and then a cherry_blossom) drifting down and
+        // swaying, mirrored each time the sway turns back (pixel-perfect flip, no
+        // rotation). Two depths: FRONT leaves fall in front of the whole forest; FAR
+        // ones are smaller and slower and fall BEHIND background.png (only seen through
+        // the gaps in the trees). Sizes are whole-pixel, nearest-neighbour. They start
+        // where the PSD has them (+ a few far ones), then respawn above the screen.
+        const HOME_LEAF_START = [          // [center x, center y, size] on the first frame — the PSD's
+            [632, 382, 1], [611, 186, 0.58], [501, 334, 0.68], [233, 212, 0.95], [127, 349, 0.6], // Leaf .. Leaf 5
+            [503, 477, 0.75], [151, 465, 1.25], [1219, 416, 0.85], [978, 600, 1.15]                // Leaf 6 .. Leaf 9
         ];
+        const HOME_BLOSSOM_START = [[812, 566, 1]]; // the PSD's cherry blossom, same format
+        const HOME_BLOSSOM_CHANCE = 0.15;  // share of respawning leaves that come back as a cherry blossom
         const HOME_LEAF_FAR_START = 4;     // far leaves on the first frame, at random spots
         const HOME_LEAF_FAR_CHANCE = 0.35; // share of respawning leaves that come back as far ones
-        const HOME_LEAF_SIZE = [0.75, 1];  // front leaf size range (x home_leaf)
+        const HOME_LEAF_SIZE = [0.6, 1.25]; // front leaf size range (x leaf_1) — as varied as in the PSD
         const HOME_LEAF_FAR_SIZE = [0.45, 0.62]; // far leaf size range
         const HOME_LEAF_FALL = [20, 36];   // fall speed range at full size (px/s) — scaled with the size
         const HOME_LEAF_SWAY = [14, 34];   // sway amplitude range at full size (px) — ditto
         const HOME_LEAF_SWAY_SPEED = [0.8, 1.4]; // sway speed range (radians/s)
-        // Koi: two swim slowly back and forth in open water (clear of the stones),
-        // the third one leaps out now and then. x = left edge, min/max bound it;
-        // facesRight = which way the artwork itself looks.
+        // Koi, both drawn in the PSD's "exclusion" blend mode: koi_2 swims slowly back and
+        // forth in open water (clear of the stones), koi_1 leaps out now and then.
+        // x = left edge, min/max bound it; facesRight = which way the artwork itself looks.
+        const HOME_KOI_BLEND = "exclusion";
         const HOME_KOI_SWIMMERS = [
-            { slot: "home_koi_2", x: 518, y: 678, min: 330, max: 620, speed: 20, facesRight: true },
-            { slot: "home_koi_3", x: 1000, y: 676, min: 830, max: 1080, speed: 16, facesRight: false }
+            { slot: "koi_2", x: 923, y: 662, min: 830, max: 1080, speed: 16, facesRight: false }
         ];
-        const HOME_KOI_JUMPER = "home_koi_1"; // diving pose, head down-left
+        const HOME_KOI_JUMPER = "koi_1"; // diving pose, head down-left
         const HOME_KOI_JUMP_ZONES = [[360, 620], [850, 1060]]; // where it may leap (x range, px)
         const HOME_KOI_WATER_Y = 704;      // water line the leap starts from and dives back into (px)
         const HOME_KOI_JUMP_H = 54;        // height of the leap (px)
@@ -252,8 +254,8 @@
         const HOME_KOI_JUMP_T = 1.0;       // duration of a leap (s)
         const HOME_KOI_JUMP_GAP = [5, 10]; // pause between two leaps (s)
 
-        const HOME_LOGO_H = 196;           // display height of logo.png (px)
-        const HOME_LOGO_Y = 120;           // vertical center of the logo (px)
+        // The FULL SEND title (title.png, full canvas: it lands exactly where the PSD has it)
+        const HOME_TITLE_BOTTOM = 360;     // just below its lowest row: the slide-in starts it fully above the screen
         const TITLE_SLIDE_DURATION = 0.6;  // how long the logo takes to slide in (s)
         const HOME_LOGO_BOUNCE_PX = 8;     // how far the logo bobs up and down once it has landed (px)
         const HOME_LOGO_BOUNCE_SPEED = 2.4; // logo bob speed (radians/s)
@@ -264,13 +266,15 @@
         // A portal opens on the left, the red gummy runs out of it, past the
         // meditating samurai, into a second portal on the right; both close, and the
         // run starts. It plays every time START is pressed (press again = skip).
-        const PORTAL_LEFT_X = 70;          // portal centers (px)
+        const PORTAL_LEFT_X = 115;         // portal centers (px) — the left one where the PSD has it
         const PORTAL_RIGHT_X = 1195;
+        const PORTAL_CENTER_Y = 471;       // vertical center of both portals (px, from the PSD)
+        const PORTAL_FRAME_COUNT = 50;     // Portal/portal_1..50: the swirl, aligned on one 121x188 canvas
+        const PORTAL_FPS = 24;             // swirl speed (frames per second): 50 frames = ~2s
         // Which way each portal leans. Mirroring is lossless on pixel art (a 45°
         // rotation would break its pixel grid), so the orientation is set with flips.
         const PORTAL_LEFT_FLIP = false;    // as drawn: leans "\" (top to the left)
         const PORTAL_RIGHT_FLIP = true;    // mirrored: leans "/" — the pair opens outward
-        const PORTAL_SINK = 6;             // the portal's bottom sits this far below GROUND_Y (px)
         const PORTAL_OPEN_T = 0.3;         // a portal opens / closes in this long (s)
         const PORTAL_HOLD_T = 0.25;        // the left portal stays open this long once the gummy is out (s)
         const INTRO_GUMMY_SPEED = 460;     // run speed across the screen (px/s)
@@ -494,14 +498,13 @@
            without touching the code.
            --------------------------------------------------------------------- */
         const ASSET_SLOTS = [
-            // Title screen: the forest (positions in HOME_BACK_LAYERS & co.)
-            "home_sky", "home_cloud_1", "home_cloud_2", "home_cloud_3", "home_cloud_4",
-            "home_mountains", "home_forest", "home_waterfall_2", "home_waterfall_3",
-            "home_rocks", "home_ground", "home_leaf", "home_water_mask",
-            "home_samurai", "home_katana", "home_koi_1", "home_koi_2", "home_koi_3",
-            "logo",
-            // START sequence
-            "portal",
+            // Title screen: the forest, named after its PSD layers (see HOME_BACK_LAYERS & co.)
+            "sky", "cloud_1", "cloud_2", "cloud_3", "cloud_4", "landscape", "tobi",
+            "background", "rocks", "front", "water_mask",
+            "leaf_1", "cherry_blossom", "koi_1", "koi_2",
+            "title", "katana", "samuraï", "eye",
+            // START sequence: the portal's swirl
+            ...Array.from({ length: PORTAL_FRAME_COUNT }, (_, i) => "Portal/portal_" + (i + 1)),
             // Player: the red gummy. The run cycle (gummy_run_1..RUN_FRAME_COUNT) is in;
             // the other states fall back to the run frame until they are drawn.
             ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => "gummy_run_" + (i + 1)),
@@ -540,7 +543,13 @@
             "leaderboard_player_1": { x: 133, y: 220, w: 758, h: 639 },
             "leaderboard_player_2": { x: 99, y: 191, w: 628, h: 640 },
             "leaderboard_player_3": { x: 200, y: 216, w: 616, h: 616 },
-            "leaderboard_player_4": { x: 304, y: 155, w: 467, h: 670 }
+            "leaderboard_player_4": { x: 304, y: 155, w: 467, h: 670 },
+            // Title-screen sprites exported at the full 1280x720 canvas: only their
+            // artwork is drawn (moved, scaled, mirrored)
+            "leaf_1": { x: 612, y: 360, w: 40, h: 45 },
+            "cherry_blossom": { x: 772, y: 276, w: 41, h: 40 },
+            "koi_1": { x: 1113, y: 656, w: 56, h: 51 },
+            "koi_2": { x: 923, y: 662, w: 55, h: 39 }
             // Deliberately NOT trimmed: animation frames that share a canvas
             // (koala_running_*, pigeon_*, gameover_player_*) — trimming each one
             // separately would make them jitter frame to frame.
@@ -1880,28 +1889,29 @@
 
         const HOME_SPLASH_T = 0.5;   // how long a koi splash lasts (s)
 
-        // Draws a slot at its native size with its top-left corner on (x, y), snapped
-        // to whole pixels; flipX / flipY mirror it in place. False if it is missing.
-        function drawNative(slot, x, y, flipX, flipY) {
+        // Draws a slot's artwork at its native size (x scale when given) with its
+        // top-left corner on (x, y), snapped to whole pixels; flipX / flipY mirror it in
+        // place. Slots listed in SPRITE_TRIM draw only their artwork's rect.
+        // False if the image is missing.
+        function drawNative(slot, x, y, flipX, flipY, scale) {
             const img = assets[slot];
             if (!img) return false;
+            const t = SPRITE_TRIM[slot] || { x: 0, y: 0, w: img.width, h: img.height };
+            const w = Math.round(t.w * (scale || 1)), h = Math.round(t.h * (scale || 1));
             x = Math.round(x);
             y = Math.round(y);
-            if (!flipX && !flipY) {
-                ctx.drawImage(img, x, y);
-                return true;
-            }
             ctx.save();
-            ctx.translate(x + (flipX ? img.width : 0), y + (flipY ? img.height : 0));
+            ctx.translate(x + (flipX ? w : 0), y + (flipY ? h : 0));
             ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, t.x, t.y, t.w, t.h, 0, 0, w, h);
             ctx.restore();
             return true;
         }
 
-        // Native size of a slot, or the fallback while it is missing
-        function slotW(slot, fallback) { return assets[slot] ? assets[slot].width : fallback; }
-        function slotH(slot, fallback) { return assets[slot] ? assets[slot].height : fallback; }
+        // Artwork size of a slot (its SPRITE_TRIM rect when measured, known even before
+        // it loads), or the fallback while it is missing
+        function slotW(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.w : assets[slot] ? assets[slot].width : fallback; }
+        function slotH(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.h : assets[slot] ? assets[slot].height : fallback; }
         function randIn(range) { return rand(range[0], range[1]); }
 
         // --- The living scene. Set up once at load, then animated on the title
@@ -1914,18 +1924,21 @@
         let koiJumpWait = 2.5;     // time before the next leap (s) — the first one comes early
         let splashes = [];         // {x, t}: where the koi broke the water
 
-        // A leaf centered on (cx, cy). far = falls behind home_forest, smaller and slower
-        function newLeaf(cx, cy, far) {
-            const size = randIn(far ? HOME_LEAF_FAR_SIZE : HOME_LEAF_SIZE);
+        // A falling leaf (or cherry blossom) centered on (cx, cy). far = falls behind the
+        // forest, smaller and slower. slot / size are picked at random when omitted.
+        function newLeaf(cx, cy, far, slot, size) {
+            slot = slot || (Math.random() < HOME_BLOSSOM_CHANCE ? "cherry_blossom" : "leaf_1");
+            size = size || randIn(far ? HOME_LEAF_FAR_SIZE : HOME_LEAF_SIZE);
             return {
-                cx, y: cy - slotH("home_leaf", 45) * size / 2, far, size,
+                cx, y: cy - slotH(slot, 45) * size / 2, far, size, slot,
                 fall: randIn(HOME_LEAF_FALL) * size, sway: randIn(HOME_LEAF_SWAY) * size,
                 speed: randIn(HOME_LEAF_SWAY_SPEED), phase: 0
             };
         }
 
         function initHomeScene() {
-            leaves = HOME_LEAF_START.map(([cx, cy]) => newLeaf(cx, cy, false));
+            leaves = HOME_LEAF_START.map(([cx, cy, size]) => newLeaf(cx, cy, false, "leaf_1", size))
+                .concat(HOME_BLOSSOM_START.map(([cx, cy, size]) => newLeaf(cx, cy, false, "cherry_blossom", size)));
             for (let i = 0; i < HOME_LEAF_FAR_START; i++) leaves.push(newLeaf(rand(0, W), rand(0, GROUND_Y), true));
             kois = HOME_KOI_SWIMMERS.map(k => ({ ...k, dir: k.facesRight ? 1 : -1 }));
         }
@@ -1939,7 +1952,7 @@
                 l.phase += l.speed * dt;
                 if (l.y > H) {
                     Object.assign(l, newLeaf(rand(0, W), 0, Math.random() < HOME_LEAF_FAR_CHANCE));
-                    l.y = -slotH("home_leaf", 45) * l.size;
+                    l.y = -slotH(l.slot, 45) * l.size;
                     l.phase = rand(0, Math.PI * 2);
                 }
             }
@@ -1975,29 +1988,26 @@
 
         // Sky, clouds, mountains, forest, the waterfall's current frame, rocks, ground
         function drawHomeBackdrop() {
-            ctx.fillStyle = "#56dbfd"; // home_sky's own color, also the placeholder while it loads
+            ctx.fillStyle = "#56dbfd"; // sky.png's own color, also the placeholder while it loads
             ctx.fillRect(0, 0, W, H);
             for (const L of HOME_BACK_LAYERS) {
                 if (L.leavesBehind) drawLeaves(true);
-                let x = L.x;
+                let x = L.x || 0;
                 if (L.drift) {
                     // right to left, back in from the right once fully gone
                     const w = slotW(L.slot, 0), period = W + w;
-                    x = -w + ((((L.x + w - L.drift * homeSceneTime) % period) + period) % period);
+                    x = -w + ((((x + w - L.drift * homeSceneTime) % period) + period) % period);
                 }
-                drawNative(L.slot, x, L.y);
+                if (L.blend) ctx.globalCompositeOperation = L.blend;
+                drawNative(L.slot, x, L.y || 0);
+                ctx.globalCompositeOperation = "source-over";
             }
-            if (HOME_WATERFALL.useFrames) {
-                const f = HOME_WATERFALL.frames;
-                const wf = f[Math.floor(homeSceneTime * HOME_WATERFALL.fps) % f.length];
-                if (wf) drawNative(wf, HOME_WATERFALL.x, HOME_WATERFALL.y);
-            }
-            for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x, L.y);
+            for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x || 0, L.y || 0);
             drawHomeWater();
         }
 
         // --- Water, animated by code (see HOME_WATER_*) ---
-        // The streaks are drawn on an offscreen canvas, cut to home_water_mask with
+        // The streaks are drawn on an offscreen canvas, cut to water_mask with
         // "destination-in" (only the mask's pixels keep them), then laid over the art.
         // No pixel is ever read back, so it also works when the page is opened as a file.
         const waterCanvas = document.createElement("canvas");
@@ -2030,7 +2040,7 @@
         }
 
         function drawHomeWater() {
-            const mask = assets["home_water_mask"];
+            const mask = assets["water_mask"];
             if (!mask) return;
             const tick = Math.floor(homeSceneTime * HOME_WATER_FPS);
             if (tick !== waterTick) {
@@ -2067,19 +2077,22 @@
             ctx.drawImage(waterCanvas, 0, 0);
         }
 
-        // The samurai, meditating on the running line. On the out-breath the rows above
+        // The samurai at his PSD spot, meditating. On the out-breath the rows above
         // HOME_BREATH_SPLIT are drawn HOME_BREATH_PX lower, over the top row below them:
-        // whole rows moved by whole pixels, nothing is ever resampled.
-        function drawHomeSamurai() {
-            const img = assets["home_samurai"];
+        // whole rows moved by whole pixels, nothing is ever resampled. eyeOpen draws
+        // eye.png on him — it follows the breath, it is part of his head.
+        function drawHomeSamurai(eyeOpen) {
+            const img = assets["samuraï"];
             if (!img) return;
-            const x = HOME_SAMURAI_X, y = GROUND_Y - img.height, s = HOME_BREATH_SPLIT;
+            const { x, y } = HOME_SAMURAI, s = HOME_BREATH_SPLIT;
             const out = Math.sin(homeSceneTime * Math.PI * 2 / HOME_BREATH_PERIOD) > 0 ? HOME_BREATH_PX : 0;
             ctx.drawImage(img, 0, s, img.width, img.height - s, x, y + s, img.width, img.height - s);
             ctx.drawImage(img, 0, 0, img.width, s, x, y + out, img.width, s);
+            if (eyeOpen) drawNative("eye", HOME_EYE.x, HOME_EYE.y + out);
         }
 
         function drawKois() {
+            ctx.globalCompositeOperation = HOME_KOI_BLEND; // the PSD's blend mode for the koi
             for (let i = 0; i < kois.length; i++) {
                 const k = kois[i];
                 const bob = Math.round(Math.sin(homeSceneTime * 1.3 + i * 2)); // ±1px
@@ -2096,9 +2109,10 @@
                 ctx.beginPath();
                 ctx.rect(0, 0, W, HOME_KOI_WATER_Y); // nothing of it shows under the water line
                 ctx.clip();
-                drawNative(HOME_KOI_JUMPER, cx - img.width / 2, cy - img.height / 2, koiJump.dir > 0, p < 0.5);
+                drawNative(HOME_KOI_JUMPER, cx - slotW(HOME_KOI_JUMPER, 0) / 2, cy - slotH(HOME_KOI_JUMPER, 0) / 2, koiJump.dir > 0, p < 0.5);
                 ctx.restore();
             }
+            ctx.globalCompositeOperation = "source-over";
             // Splashes: a few droplets thrown up that fall back into the water
             ctx.fillStyle = "#e8f8ff";
             for (const s of splashes) {
@@ -2118,31 +2132,25 @@
         // like the rest of the pixel art), mirrored while it swings back to the left —
         // which reads as the leaf turning over.
         function drawLeaves(far) {
-            const img = assets["home_leaf"];
-            if (!img) return;
             for (const l of leaves) {
                 if (l.far !== far) continue;
-                const w = Math.round(img.width * l.size), h = Math.round(img.height * l.size);
-                const x = Math.round(l.cx + Math.sin(l.phase) * l.sway - w / 2), y = Math.round(l.y);
-                const flip = Math.cos(l.phase) < 0;
-                ctx.save();
-                ctx.translate(flip ? x + w : x, y);
-                if (flip) ctx.scale(-1, 1);
-                ctx.drawImage(img, 0, 0, w, h);
-                ctx.restore();
+                const w = Math.round(slotW(l.slot, 40) * l.size);
+                drawNative(l.slot, l.cx + Math.sin(l.phase) * l.sway - w / 2, l.y, Math.cos(l.phase) < 0, false, l.size);
             }
         }
 
-        // The whole title-screen scene (the far leaves are drawn inside the backdrop,
-        // behind home_forest). actors() draws the START sequence's portals and gummy
-        // in front of the samurai (he runs past him) and behind the koi.
-        function drawHomeScene(actors) {
+        // The whole title-screen scene, in the PSD's order: the backdrop (with the far
+        // leaves inside it, behind the forest), the front leaves, the koi, the title,
+        // the katana, the samurai. actors() draws the START sequence's portals and
+        // gummy last, so the gummy runs in front of the samurai. eyeOpen: see drawHomeSamurai.
+        function drawHomeScene(actors, eyeOpen) {
             drawHomeBackdrop();
             drawLeaves(false);
-            drawHomeSamurai();
-            drawNative("home_katana", HOME_KATANA_X, GROUND_Y - slotH("home_katana", 0));
-            if (actors) actors();
             drawKois();
+            drawHomeTitle();
+            drawNative("katana", 0, 0);
+            drawHomeSamurai(eyeOpen || HOME_EYE_ALWAYS);
+            if (actors) actors();
         }
 
         // --- Standing sprites (the koala of the death sequence) ---
@@ -2185,19 +2193,18 @@
             return base + "_" + (Math.floor(t * fps) % count + 1);
         }
 
-        // The FULL SEND logo: slides down from above on arrival, then bobs gently in
-        // place. Until a logo.png exists, the title is chunky pixel text.
-        function drawHomeLogo() {
+        // The FULL SEND title (title.png, full canvas): slides down from above the screen
+        // to its PSD spot on arrival, then bobs gently in place (whole pixels).
+        function drawHomeTitle() {
             const slide = Math.min(1, homeTime / TITLE_SLIDE_DURATION);
             const ease = 1 - (1 - slide) * (1 - slide);
-            // The bob fades in with the slide, so it never yanks the logo on arrival
+            // The bob fades in with the slide, so it never yanks the title on arrival
             const t = performance.now() / 1000;
             const bob = Math.sin(t * HOME_LOGO_BOUNCE_SPEED) * HOME_LOGO_BOUNCE_PX * slide;
-            const cy = -HOME_LOGO_H + ease * (HOME_LOGO_Y + HOME_LOGO_H) + bob;
-            const h = HOME_LOGO_H, w = h * slotAspect("logo");
-            if (!drawSlot("logo", W / 2 - w / 2, cy - h / 2, w, h)) {
-                drawPixelText("FULL SEND", W / 2 + 5, cy + 5, 16, 5, MENU_SHADOW);
-                drawPixelText("FULL SEND", W / 2, cy, 16, 5, "#ffffff");
+            const dy = -HOME_TITLE_BOTTOM * (1 - ease) + bob;
+            if (!drawNative("title", 0, dy)) {
+                drawPixelText("FULL SEND", W / 2 + 5, 240 + dy + 5, 16, 5, MENU_SHADOW);
+                drawPixelText("FULL SEND", W / 2, 240 + dy, 16, 5, "#ffffff");
             }
         }
         // LOADING progress, 0..1: the real image loading, but never faster than
@@ -2252,7 +2259,6 @@
         // is in place (see homeReady), and fade in over HOME_MENU_FADE_T.
         function drawHome() {
             drawHomeScene(null);
-            drawHomeLogo();
 
             if (homeReady()) {
                 ctx.globalAlpha = Math.min(1, homeMenuTime / HOME_MENU_FADE_T);
@@ -2333,14 +2339,22 @@
             return Math.max(0, Math.min(1, open, close));
         }
 
-        // A portal standing on the running line: native size once open, scaled around
-        // its center while it opens / closes (no smoothing, so it stays pixelated);
-        // flip mirrors it (see PORTAL_LEFT_FLIP / PORTAL_RIGHT_FLIP)
-        function drawPortal(cx, s, flip) {
+        // Portal frames actually delivered (the swirl loops over what exists)
+        function portalFrameCount() {
+            let n = 0;
+            while (n < PORTAL_FRAME_COUNT && assets["Portal/portal_" + (n + 1)]) n++;
+            return n;
+        }
+
+        // A portal — the swirl's frame for time t — centered on (cx, PORTAL_CENTER_Y):
+        // native size once open, scaled around its center while it opens / closes (no
+        // smoothing, so it stays pixelated); flip mirrors it (see PORTAL_*_FLIP)
+        function drawPortal(cx, s, flip, t) {
             if (s <= 0) return;
-            const img = assets["portal"];
+            const n = portalFrameCount();
+            const img = n ? assets["Portal/portal_" + (Math.floor(t * PORTAL_FPS) % n + 1)] : null;
             const pw = img ? img.width : 100, ph = img ? img.height : 156;
-            const cy = GROUND_Y + PORTAL_SINK - ph / 2;
+            const cy = PORTAL_CENTER_Y;
             if (!img) {
                 ctx.fillStyle = "#5a2ab0"; // placeholder: a purple oval
                 ctx.beginPath();
@@ -2360,13 +2374,17 @@
         function drawIntro() {
             const tl = introTimeline();
             const t = introTime;
+            const rt = t - tl.run;                                           // time since the gummy set off
+            const x = PORTAL_LEFT_X - gummyWidth() + INTRO_GUMMY_SPEED * rt; // its left edge
+            const running = t >= tl.run && t < tl.arrive;
+            // The samurai opens an eye while the gummy runs past him
+            const gcx = x + gummyWidth() / 2;
+            const peek = running && gcx >= HOME_EYE_RANGE[0] && gcx <= HOME_EYE_RANGE[1];
 
             drawHomeScene(() => {
-                drawPortal(PORTAL_LEFT_X, portalScale(t, 0, tl.leftClose), PORTAL_LEFT_FLIP);
-                drawPortal(PORTAL_RIGHT_X, portalScale(t, tl.rightOpen, tl.arrive), PORTAL_RIGHT_FLIP);
-                if (t < tl.run || t >= tl.arrive) return;
-                const rt = t - tl.run;
-                const x = PORTAL_LEFT_X - gummyWidth() + INTRO_GUMMY_SPEED * rt;
+                drawPortal(PORTAL_LEFT_X, portalScale(t, 0, tl.leftClose), PORTAL_LEFT_FLIP, t);
+                drawPortal(PORTAL_RIGHT_X, portalScale(t, tl.rightOpen, tl.arrive), PORTAL_RIGHT_FLIP, t);
+                if (!running) return;
                 const slot = gummyRunSlot(rt);
                 // Only one run frame so far: a little hop stands in for the legs
                 const hop = runFrameCount() === 1
@@ -2380,8 +2398,7 @@
                     ctx.fillRect(Math.round(x), GROUND_Y - PLAYER_H - hop, PLAYER_W, PLAYER_H);
                 }
                 ctx.restore();
-            });
-            drawHomeLogo();
+            }, peek);
 
             ctx.textAlign = "center";
             ctx.font = "14px monospace";
