@@ -183,10 +183,34 @@
         ];
         // The waterfall's frame 1 is the one painted in home_forest; frames 2 and 3
         // are drawn over it, so the loop is forest / 2 / 3.
-        const HOME_WATERFALL = { x: 1103, y: 258, fps: 3, frames: [null, "home_waterfall_2", "home_waterfall_3"] };
+        // TEST: set aside (useFrames: false) — the water is animated by code instead
+        // (HOME_WATER_* below). true = back to the drawn frames.
+        const HOME_WATERFALL = { x: 1103, y: 258, fps: 3, frames: [null, "home_waterfall_2", "home_waterfall_3"], useFrames: false };
         const HOME_FRONT_LAYERS = [
             { slot: "home_rocks", x: 1, y: 373 },
             { slot: "home_ground", x: 0, y: 530 }     // the grass ledge (running line) + the water
+        ];
+        // WATER, animated by code (test). home_water_mask.png marks, pixel for pixel,
+        // which pixels of the forest are water (white = water — it can be repainted in
+        // Photoshop). The code draws moving light and dark streaks, keeps only what
+        // falls inside the mask, and lays that over the art: the drawing never changes.
+        // Each zone has its own flow; a flow's streaks are fixed random seeds.
+        const HOME_WATER_FPS = 12;         // the pattern steps this many times per second (retro, not smooth)
+        const HOME_WATER_LIGHT = "rgba(235,252,255,0.55)"; // highlight streaks
+        const HOME_WATER_DARK = "rgba(0,70,95,0.22)";      // shadow streaks
+        const HOME_WATER_FLOWS = {
+            // dir: "down" = vertical streaks pouring down, "flow" = short ripples carried
+            // downstream, "side" = ripples drifting sideways and twinkling.
+            // density = streaks per px² of zone, len / speed = ranges (px, px/s), light = share of highlights
+            fall: { dir: "down", density: 0.02, len: [6, 18], speed: [80, 140], light: 0.4 },
+            stream: { dir: "flow", density: 0.004, len: [3, 9], speed: [25, 45], light: 0.5 },
+            ripple: { dir: "side", density: 0.0025, len: [4, 14], speed: [4, 12], light: 0.7 }
+        };
+        const HOME_WATER_ZONES = [
+            { x: 1100, y: 255, w: 72, h: 185, flow: "fall" },     // the waterfall
+            { x: 1025, y: 485, w: 95, h: 55, flow: "ripple" },    // the pool under the bridge
+            { x: 1000, y: 540, w: 280, h: 180, flow: "stream" },  // the stream under the log
+            { x: 0, y: 645, w: 1000, h: 75, flow: "ripple" }      // the pond
         ];
         // The samurai and his katana sit ON the running line (GROUND_Y): only x is set here
         const HOME_SAMURAI_X = 208;        // left edge (px)
@@ -473,7 +497,7 @@
             // Title screen: the forest (positions in HOME_BACK_LAYERS & co.)
             "home_sky", "home_cloud_1", "home_cloud_2", "home_cloud_3", "home_cloud_4",
             "home_mountains", "home_forest", "home_waterfall_2", "home_waterfall_3",
-            "home_rocks", "home_ground", "home_leaf",
+            "home_rocks", "home_ground", "home_leaf", "home_water_mask",
             "home_samurai", "home_katana", "home_koi_1", "home_koi_2", "home_koi_3",
             "logo",
             // START sequence
@@ -1963,10 +1987,84 @@
                 }
                 drawNative(L.slot, x, L.y);
             }
-            const f = HOME_WATERFALL.frames;
-            const wf = f[Math.floor(homeSceneTime * HOME_WATERFALL.fps) % f.length];
-            if (wf) drawNative(wf, HOME_WATERFALL.x, HOME_WATERFALL.y);
+            if (HOME_WATERFALL.useFrames) {
+                const f = HOME_WATERFALL.frames;
+                const wf = f[Math.floor(homeSceneTime * HOME_WATERFALL.fps) % f.length];
+                if (wf) drawNative(wf, HOME_WATERFALL.x, HOME_WATERFALL.y);
+            }
             for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x, L.y);
+            drawHomeWater();
+        }
+
+        // --- Water, animated by code (see HOME_WATER_*) ---
+        // The streaks are drawn on an offscreen canvas, cut to home_water_mask with
+        // "destination-in" (only the mask's pixels keep them), then laid over the art.
+        // No pixel is ever read back, so it also works when the page is opened as a file.
+        const waterCanvas = document.createElement("canvas");
+        waterCanvas.width = W;
+        waterCanvas.height = H;
+        const waterCtx = waterCanvas.getContext("2d");
+        let waterStreaks = null;   // one list of seeds per zone, built on first use
+        let waterTick = -1;        // the pattern step currently on waterCanvas
+
+        // Small seeded random generator: the same pattern on every load
+        function seededRandom(seed) {
+            return () => {
+                seed = (seed + 0x6D2B79F5) | 0;
+                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        function buildWaterStreaks() {
+            const rnd = seededRandom(1234);
+            const between = (range) => range[0] + rnd() * (range[1] - range[0]);
+            return HOME_WATER_ZONES.map(z => {
+                const F = HOME_WATER_FLOWS[z.flow];
+                return Array.from({ length: Math.round(z.w * z.h * F.density) }, () => ({
+                    x: rnd() * z.w, y: rnd() * z.h, len: Math.round(between(F.len)),
+                    speed: between(F.speed), phase: rnd() * Math.PI * 2, light: rnd() < F.light
+                }));
+            });
+        }
+
+        function drawHomeWater() {
+            const mask = assets["home_water_mask"];
+            if (!mask) return;
+            const tick = Math.floor(homeSceneTime * HOME_WATER_FPS);
+            if (tick !== waterTick) {
+                waterTick = tick;
+                const t = tick / HOME_WATER_FPS;
+                if (!waterStreaks) waterStreaks = buildWaterStreaks();
+                waterCtx.clearRect(0, 0, W, H);
+                HOME_WATER_ZONES.forEach((z, i) => {
+                    const F = HOME_WATER_FLOWS[z.flow];
+                    waterCtx.save();
+                    waterCtx.beginPath();
+                    waterCtx.rect(z.x, z.y, z.w, z.h); // a zone's streaks never spill into the next
+                    waterCtx.clip();
+                    for (const s of waterStreaks[i]) {
+                        waterCtx.fillStyle = s.light ? HOME_WATER_LIGHT : HOME_WATER_DARK;
+                        if (F.dir === "down") {
+                            const y = ((s.y + s.speed * t) % (z.h + s.len)) - s.len;
+                            waterCtx.fillRect(z.x + Math.round(s.x), z.y + Math.round(y), 1, s.len);
+                        } else if (F.dir === "flow") {
+                            const y = (s.y + s.speed * t) % z.h;
+                            waterCtx.fillRect(z.x + Math.round(s.x), z.y + Math.round(y), s.len, 1);
+                        } else {
+                            if (Math.sin(t * 1.6 + s.phase) < -0.2) continue; // twinkle: off for a moment
+                            const x = ((s.x + s.speed * t) % (z.w + s.len)) - s.len;
+                            waterCtx.fillRect(z.x + Math.round(x), z.y + Math.round(s.y), s.len, 1);
+                        }
+                    }
+                    waterCtx.restore();
+                });
+                waterCtx.globalCompositeOperation = "destination-in"; // keep them on water pixels only
+                waterCtx.drawImage(mask, 0, 0);
+                waterCtx.globalCompositeOperation = "source-over";
+            }
+            ctx.drawImage(waterCanvas, 0, 0);
         }
 
         // The samurai, meditating on the running line. On the out-breath the rows above
