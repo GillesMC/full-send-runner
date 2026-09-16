@@ -825,7 +825,7 @@
         }
 
         /* =====================================================================
-           MIX — the music and sounds (assets/music/*.wav)
+           MIX — the music and sounds (assets/Music/*.wav)
            Two buses, MUSIC and SFX, into MASTER, then a safety limiter so the sum
            never clips. A missing file just stays silent.
            Browsers keep all sound off until the first click / key press: a press
@@ -846,9 +846,9 @@
         const MIX_PAN = 0.3;               // stereo: a sound at the edge of the screen sits this far to that side (0..1)
         // --- Files and timing ---
         const SOUND_FILES = {
-            theme: "music/theme",
-            tanchoJump: "music/tancho_koi_jump",
-            tanchoSplash: "music/tancho_koi_splash"
+            theme: "Music/theme",
+            tanchoJump: "Music/tancho_koi_jump",
+            tanchoSplash: "Music/tancho_koi_splash"
         };
         // Where the sound actually hits in each file (s): it is lined up so that this
         // moment, not the start of the file, lands on the frame it goes with.
