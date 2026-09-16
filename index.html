@@ -169,7 +169,7 @@
         // Everything comes from "Master Home Screen.psd": each image is named after its
         // layer and keeps its PSD position. Most layers are exported at
         // the full 1280x720 canvas, so they are drawn at (0, 0); the few trimmed ones
-        // (tobi, samuraï, eye) carry their PSD position. Pixel art drawn 1:1, never
+        // (tobi, samurai, eye) carry their PSD position. Pixel art drawn 1:1, never
         // scaled. Listed back to front.
         // drift = the clouds creep right to left (px/s, the furthest one slowest) and come
         // back in from the right once fully gone. blend = a blend mode for the layer (none use one now).
@@ -222,15 +222,16 @@
             { x: 1095, y: 578, w: 135, h: 67, flow: "stream" },   // under the log, between the two rocks: flows down
             { x: 0, y: 645, w: 1280, h: 75, flow: "ripple" }      // past the rocks: the whole pond, one current, left to right
         ];
-        // The samurai (samuraï.png, trimmed) at his PSD spot; katana.png is full-canvas.
+        // The samurai (samurai.png, trimmed) at his PSD spot; katana.png is full-canvas.
         const HOME_SAMURAI = { x: 185, y: 346 };
         // He meditates, barely moving: on every out-breath his head, hands and shoulders
         // sink one pixel, all together — the rows above HOME_BREATH_SPLIT slide down over that
         // row. The seam sits in his chest, well above his legs: his knees start on row 146 and
         // his elbows rest on them, so nothing from there down ever moves.
         const HOME_BREATH_PX = 1;          // 0 = perfectly still
-        const HOME_BREATH_SPLIT = 90;      // the row of samuraï.png the out-breath covers (chest, under the hands)
-        const HOME_BREATH_PERIOD = 2.5;    // one full breath (s)
+        const HOME_BREATH_SPLIT = 90;      // the row of samurai.png the out-breath covers (chest, under the hands)
+        const HOME_BREATH_PERIOD = 1.5;    // one full breath (s): in-breath, then out-breath, half each
+        const HOME_BREATH_PAUSE = 2;       // then he stays breathed out this long before the next breath (s)
         // His open eye (eye.png = the PSD's "Oeil" layer): he peeks at the gummy while it
         // runs past him in the START sequence. HOME_EYE_ALWAYS = true keeps it open, as in the PSD.
         const HOME_EYE = { x: 333, y: 411 };
@@ -267,21 +268,24 @@
         const HOME_LEAF_MEMORY = 4;        // ...where the last this many came down
         const HOME_LEAF_SMALL = 0.62;      // front leaves smaller than this (x leaf_1) are the small, further back ones
         const HOME_LEAF_HIDDEN_Y = 555;    // front.png's ledge edge is above this all across (532..554): a small leaf whose top is past it is out of sight (px)
-        // The koi (koi_1.png, drawn level: head to the side) passes through the pond now and
+        // The koi (koi_2.png, drawn level: head to the side) passes through the pond now and
         // then, always level. It comes up from under the bottom of the screen while already
         // swimming forward, swims straight across the DARK water, then goes back down out of
         // the screen the same way, still swimming forward. Its swim line is just under the
         // rock / water edge (HOME_POND_TOP) all along it, and a trip is only taken if the
         // whole koi stays under that edge and in the dark water on the way up and down too.
-        // Mirrored when it swims the other way. It pays no attention to anything else (it
-        // swims under the floating flowers, the leaves and the tancho) and is cut at HOME_POND_TOP.
-        const HOME_KOI = "koi_1";
-        const HOME_KOI_FACES = 1;          // which way its head points in koi_1.png: 1 = right, -1 = left
+        // It never swims under the tancho's leaps: no part of its trip crosses the columns
+        // any leap can reach (see HOME_KOI_JUMP_*). Mirrored when it swims the other way. It
+        // pays no attention to anything else (it swims under the floating flowers and the
+        // leaves) and is cut at HOME_POND_TOP.
+        const HOME_KOI = "koi_2";
+        const HOME_KOI_FACES = -1;         // which way its head points in koi_2.png: 1 = right, -1 = left
         const HOME_KOI_ZONE = [0, 1040];   // its left and right edges always stay in here: the dark water, left of the pale pool under the waterfall (px)
         const HOME_KOI_SWIM = [120, 400];  // how far it swims level, on its swim line (px)
         const HOME_KOI_SLANT = [0.4, 2.5]; // coming up / going down: px it swims forward per px up or down (drawn per trip: steep enough to come up between the rocks)
         const HOME_KOI_SPEED = 8;          // px/s
         const HOME_KOI_GAP = [4, 10];      // pause between two trips (s)
+        const HOME_KOI_TRIES = 300;        // trips drawn at random each time, until one fits (few do: it only has the left of the pond)
         // The tancho koi is the only one that leaps: out of the pond in an arc, in front of
         // the ledge. Two poses: head up on the way up, then level (head forward) from just
         // before the top of the arc until it is back in the water. It is scaled
@@ -318,13 +322,13 @@
         // HOME_POND_TOP was measured on water_mask.png: measure it again if front.png changes.
         const HOME_FLOATERS = [            // PSD spot + size (px), listed top to bottom
             { slot: "dark_floating_leaf", x: 913, y: 649, w: 31, h: 10 },
-            { slot: "lily_pad_2", x: 859, y: 662, w: 27, h: 28 },
+            { slot: "lily_pad_2", x: 861, y: 665, w: 24, h: 25 },
             { slot: "lily_pad", x: 1047, y: 680, w: 29, h: 14 },
             { slot: "lily_pad_3", x: 376, y: 685, w: 71, h: 17 },
             { slot: "dark_lily_pad", x: 110, y: 685, w: 26, h: 17 },
             { slot: "floating_leaf", x: 877, y: 690, w: 72, h: 12 },
             { slot: "floating_leaf_2", x: 668, y: 697, w: 96, h: 20 },
-            { slot: "lily_pad_4", x: 588, y: 699, w: 26, h: 21 }
+            { slot: "lily_pad_4", x: 588, y: 701, w: 26, h: 19 }
         ];
         const HOME_FLOAT_SPEED = 6;        // the current (px/s) — the pond's ripples go 4..12
         const HOME_FLOAT_LOOP = 1400;      // one trip of the current (px): a flower is back 120px after leaving on the right
@@ -588,9 +592,9 @@
             // Title screen: the forest, named after its PSD layers (see HOME_BACK_LAYERS & co.)
             "sky", "cloud_1", "cloud_2", "cloud_3", "cloud_4", "landscape", "tobi",
             "background", "rocks", "front", "water_mask",
-            "leaf_1", "cherry_blossom", "koi_1", "tancho_koi",
+            "leaf_1", "cherry_blossom", "koi_2", "tancho_koi",
             ...HOME_FLOATERS.map(f => f.slot),
-            "title", "katana", "samuraï", "eye",
+            "title", "katana", "samurai", "eye",
             // START sequence: the portal's swirl
             ...Array.from({ length: PORTAL_FRAME_COUNT }, (_, i) => "Portal/portal_" + (i + 1)),
             // Player: the red gummy. The run cycle (gummy_run_1..RUN_FRAME_COUNT) is in;
@@ -2219,7 +2223,7 @@
             // The koi: waits, then takes a trip through the pond, leg after leg, at its pace
             if (!koi.trip) {
                 if ((koi.wait -= dt) <= 0) {
-                    koi.trip = planKoiTrip();
+                    for (let n = 0; n < HOME_KOI_TRIES && !koi.trip; n++) koi.trip = planKoiTrip();
                     koi.wait = 1; // no trip fits right now: it tries again in a moment
                     if (koi.trip) {
                         koi.x = koi.trip.points[0].x;
@@ -2370,10 +2374,11 @@
         // whole rows moved by whole pixels, nothing is ever resampled. eyeOpen draws
         // eye.png on him — it follows the breath, it is part of his head.
         function drawHomeSamurai(eyeOpen) {
-            const img = assets["samuraï"];
+            const img = assets["samurai"];
             if (!img) return;
             const { x, y } = HOME_SAMURAI, s = HOME_BREATH_SPLIT;
-            const out = Math.sin(homeSceneTime * Math.PI * 2 / HOME_BREATH_PERIOD) > 0 ? HOME_BREATH_PX : 0;
+            const t = homeSceneTime % (HOME_BREATH_PERIOD + HOME_BREATH_PAUSE); // in-breath | out-breath | pause (still out)
+            const out = t >= HOME_BREATH_PERIOD / 2 ? HOME_BREATH_PX : 0;
             ctx.drawImage(img, 0, s, img.width, img.height - s, x, y + s, img.width, img.height - s);
             ctx.drawImage(img, 0, 0, img.width, s, x, y + out, img.width, s);
             if (eyeOpen) drawNative("eye", HOME_EYE.x, HOME_EYE.y + out);
@@ -2510,13 +2515,18 @@
             for (let c = Math.max(0, Math.floor(x0)); c <= Math.min(W - 1, Math.ceil(x1)); c++) y = Math.max(y, pondTopCol[c]);
             return y;
         }
+        // The columns the tancho's leaps can reach, whatever the shift and the side: [left, right] (px)
+        function tanchoColumns() {
+            const { w, h } = tanchoSize(), reach = Math.max(w, h) / 2 + HOME_KOI_JUMP_DX / 2;
+            return [HOME_KOI_JUMP_CX + Math.min(...HOME_KOI_JUMP_SHIFT) - reach, HOME_KOI_JUMP_CX + Math.max(...HOME_KOI_JUMP_SHIFT) + reach];
+        }
         // A trip for the koi drawn at random, or null if it does not fit: {dir, points} — its
         // top-left corner under the bottom of the screen, where it is level on its swim line,
         // where it leaves that line, and under the bottom of the screen again. dir 1 = heading right.
         function planKoiTrip() {
             const img = assets[HOME_KOI];
             if (!img) return null;
-            const w = img.width, h = img.height, Z = HOME_KOI_ZONE;
+            const w = img.width, h = img.height, Z = HOME_KOI_ZONE, T = tanchoColumns();
             const dir = Math.random() < 0.5 ? 1 : -1, len = randIn(HOME_KOI_SWIM);
             if (Z[1] - w - len < Z[0]) return null;
             const left = rand(Z[0], Z[1] - w - len);                 // the left end of its swim
@@ -2525,10 +2535,12 @@
             if (y > H - h / 2) return null;                          // not even half of it in sight
             const out = H + 2, run = (out - y) * randIn(HOME_KOI_SLANT); // how far it swims on while coming up / going down
             const points = [{ x: from - dir * run, y: out }, { x: from, y }, { x: to, y }, { x: to + dir * run, y: out }];
-            for (const [a, b] of [[points[0], points[1]], [points[2], points[3]]]) {
+            for (let i = 0; i < 3; i++) {
+                const a = points[i], b = points[i + 1];
                 for (let k = 0; k <= 16; k++) {
                     const x = a.x + (b.x - a.x) * k / 16, top = a.y + (b.y - a.y) * k / 16;
                     if (x < Z[0] || x + w > Z[1] || top - 1 < koiEdge(x, x + w)) return null;
+                    if (x + w > T[0] && x < T[1]) return null;       // under the tancho's leaps
                 }
             }
             return { dir, points };
