@@ -1617,10 +1617,12 @@
         let lastTime = performance.now();
 
         function loop(now) {
-            // Delta time in seconds, clamped so a background tab doesn't teleport the game
+            // Delta time in seconds, clamped so a background tab doesn't teleport the game.
+            // Never below 0: the first frame's timestamp can come from just BEFORE the script
+            // read lastTime, and a negative step would run the clocks backwards.
             let dt = (now - lastTime) / 1000;
             lastTime = now;
-            if (dt > 0.05) dt = 0.05;
+            dt = Math.max(0, Math.min(dt, 0.05));
 
             mixTick();
             // Blocked (phone / tablet / tiny window): the world is frozen and nothing is
