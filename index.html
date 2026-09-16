@@ -344,11 +344,12 @@
 
         // --- Menu ---
         // PRESS START does not start anything yet: a press swaps it for this message,
-        // same font and color, each line centered where PRESS START is, for PRESS_MESSAGE_T.
-        // The last line sits on PRESS START's baseline, the ones before it above it: the block
-        // stays between the title (its lowest bob: y 343) and the tancho's leap (top: y 440).
-        const PRESS_MESSAGE_LINES = ["Congrats,", "you’ve finished the game"];
-        const PRESS_MESSAGE_LINE_H = 40;   // baseline to baseline (px): the 26px letters + a 14px gap
+        // same typeface and color, each line centered where PRESS START is, for PRESS_MESSAGE_T.
+        // The first line sits on PRESS START's baseline, the next ones below it (they may cross
+        // the top of the tancho's leap, y 440: the message is drawn over it).
+        const PRESS_MESSAGE_LINES = ["CONGRATS", "YOU'VE FINISHED THE GAME"];
+        const PRESS_MESSAGE_FONT = '20px "Press Start 2P"'; // a little smaller than PRESS START (26px)
+        const PRESS_MESSAGE_LINE_H = 30;   // baseline to baseline (px): the 20px letters + a 10px gap
         const PRESS_MESSAGE_T = 2;         // how long the message stays up (s)
 
         /* =====================================================================
@@ -908,6 +909,7 @@
             // The first press ever, if sound was still off, only turns it on (see unlockSound)
             if (pressUnlocksSound) { pressUnlocksSound = false; return; }
             if (!homeReady()) return; // PRESS START is not up yet
+            if (pressMessageTime > 0) return; // the message is up: PRESS START is back once it is gone
             playSfx("pressStart", MIX_PRESS_START, W / 2);
             pressMessageTime = PRESS_MESSAGE_T;
         }
@@ -1580,8 +1582,9 @@
                 ctx.fillStyle = P.color;
                 if (pressMessageTime > 0) {
                     const cx = P.x + ctx.measureText(P.text).width / 2;
+                    ctx.font = PRESS_MESSAGE_FONT;
                     PRESS_MESSAGE_LINES.forEach((line, i) => {
-                        const y = P.y - (PRESS_MESSAGE_LINES.length - 1 - i) * PRESS_MESSAGE_LINE_H;
+                        const y = P.y + i * PRESS_MESSAGE_LINE_H;
                         ctx.fillText(line, Math.round(cx - ctx.measureText(line).width / 2), y);
                     });
                 } else {
