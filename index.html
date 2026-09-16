@@ -53,10 +53,10 @@
             filter: brightness(1.12) contrast(1.08) saturate(1.25);
         }
 
-        /* The LOADING screen has its own CRT look, drawn in code: no arcade filter on it,
-           only its own brightness (1 = as drawn) */
+        /* The LOADING screen has its own CRT look, drawn in code (see BOOT_* in the script):
+           no arcade filter on it, only this overall brightness (1 = as drawn) */
         #game.boot {
-            filter: brightness(1.35);
+            filter: brightness(1);
         }
 
         /* BACKLIGHT — a tiny live copy of the screen, blown up and blurred behind it:
@@ -153,31 +153,39 @@
         // --- LOADING screen: the frog on its lily pad (assets/loading screen/), through an old CRT ---
         // Measured on "Loading Screen.png". Once loading is done, ENTER replaces LOADING and
         // the screen waits for a click (or a key) anywhere: that first press turns the sound on.
-        const BOOT_FONT = '50px "VT323"';  // LOADING / ENTER: 28px capitals, as in the reference
-        const BOOT_TEXT_Y = 490;           // their baseline (px), centered on the screen
+        // A soft CRT, not TV static: everything below is drawn in code, the frames are never changed.
+        const BOOT_BG = "#0b0c1a";         // very dark navy, a little darker than the reference's #0e0f1d:
+        // the grain lifts it back to it
+        const BOOT_BG_NOISE = 2;           // background texture: each pixel +- up to this (0..255)
+        const BOOT_VIGNETTE = 0.3;         // how dark the corners get (0 = no vignette)
+        // The frames: Frog_0023_1 .. Frog_0000_24, all on one 300x300 canvas (frame n = Frog_(24-n)_n).
+        // How long each one stays up (s), in order; 0 = a single screen refresh, as fast as it goes.
+        const FROG_FRAME_T = [...Array(14).fill(0.1), ...Array(10).fill(0)];
+        const FROG_POS = { x: 489, y: 158 }; // top-left of the 300x300 frames: the frog lands on the reference's
+        // The frog: contrast, brightness and saturation brought down a touch (1 = as drawn)
+        const FROG_FILTER = "contrast(0.88) brightness(0.94) saturate(0.85)";
+        // Its light bleed: a blurred copy underneath, added as light (so its dark outline casts no
+        // shadow): a green glow around the frog, a pink / red one around the lily pad
+        const FROG_GLOW_BLUR = 8;          // px
+        const FROG_GLOW_ALPHA = 0.24;
+        // LOADING / ENTER: VT323 drawn small then enlarged pixel for pixel, in a faded blue-grey white
+        const BOOT_TEXT_PX = 20;           // the font size it is drawn at...
+        const BOOT_TEXT_SCALE = 2;         // ...then enlarged this much (whole pixels): 22px capitals
+        const BOOT_TEXT_Y = 490;           // baseline on screen (px), centered on the screen
+        const BOOT_TEXT_COLOR = "#c9d2e0";
+        const BOOT_TEXT_ALPHA = 0.85;
+        const BOOT_TEXT_GLOW_BLUR = 3;     // its soft glow (px)...
+        const BOOT_TEXT_GLOW_ALPHA = 0.3;  // ...this strong
         const BOOT_DOT_T = 0.35;           // LOADING's dots come one by one, this often (s); ENTER only
         // replaces it once the third one has been up for as long
-        const BOOT_BG = "#060713";         // navy, darker than the reference's #0e0f1d: the grain and the
-        // bloom below lift it back to it
-        // The frames are Frog_0023_Calque-1 .. Frog_0000_Calque-24: Photoshop numbers the layers
-        // from the top, so Calque-1 is the first frame (sitting, ripples, the fly, the tongue).
-        const FROG_FRAME_COUNT = 24;
-        const FROG_FPS = 12;               // animation speed (frames per second): 24 frames = 2s
-        const FROG_POS = { cx: 640, bottom: 386 }; // each frame is drawn centered on cx, its bottom row on `bottom` (px)
-        // The CRT look, all drawn in code — the frames themselves are never changed:
-        const FROG_SOFT_BLUR = 0.6;        // the frog, very slightly softened (px)...
-        const FROG_CONTRAST = 0.9;         // ...and its digital contrast brought down a touch (1 = as drawn)
-        const FROG_GLOW_BLUR = 6.5;        // its light bleed: a blurred copy underneath (px)...
-        const FROG_GLOW_ALPHA = 0.28;      // ...this opaque
-        const BOOT_TEXT_GLOW_BLUR = 4;     // the text's soft glow (px)...
-        const BOOT_TEXT_GLOW_ALPHA = 0.55; // ...this opaque
-        const BOOT_BLOOM_BLUR = 2;         // screen softness: the picture, blurred, added back over itself (px)...
-        const BOOT_BLOOM_ALPHA = 0.18;     // ...this strong: bright pixels bleed into their neighbours
-        const BOOT_SCANLINE_ALPHA = 0.04;  // a faint dark line on every 3rd row
-        const BOOT_GRAIN_ALPHA = 0.06;     // fine grey grain over EVERYTHING (frog and text included)...
+        // The screen itself
+        const BOOT_SOFTNESS = 0.6;         // the whole picture, very slightly blurred (px)
+        const BOOT_BLOOM_BLUR = 3;         // bright parts bleeding a little: the picture blurred, added as light (px)...
+        const BOOT_BLOOM_ALPHA = 0.06;     // ...this much
+        const BOOT_SCANLINE_ALPHA = 0.025; // a barely visible dark line on every 3rd row
+        const BOOT_GRAIN_ALPHA = 0.03;     // fine grey grain over EVERYTHING (frog and text included)...
+        const BOOT_GRAIN_SPREAD = 64;      // ...each grain pixel within +- this of mid-grey (0..127: lower = softer)
         const BOOT_GRAIN_HOLD = [1, 2];    // ...jumping to a new random pattern every 1 or 2 frames
-        const BOOT_BG_NOISE = 3;           // background texture: each pixel +- up to this (0..255)
-        const BOOT_VIGNETTE = 0.3;         // how dark the corners get (0 = no vignette)
 
         // --- Title screen: the forest ---
         // Everything comes from "Master Home Screen.psd": each image is named after its
@@ -449,7 +457,7 @@
            --------------------------------------------------------------------- */
         const ASSET_SLOTS = [
             // LOADING screen: the frog (first, so it shows while the rest loads)
-            ...Array.from({ length: FROG_FRAME_COUNT }, (_, i) => frogSlot(i + 1)),
+            ...FROG_FRAME_T.map((_, i) => frogSlot(i + 1)),
             // Title screen: the forest, named after its PSD layers (see HOME_BACK_LAYERS & co.)
             "sky", "cloud_1", "cloud_2", "cloud_3", "cloud_4", "landscape", "tobi",
             "background", "rocks", "front", "water_mask",
@@ -971,6 +979,7 @@
                 // round of dots (all three shown), never in the middle of one.
                 const before = bootTime, round = BOOT_DOT_T * 4;
                 bootTime += dt;
+                updateFrog(dt);
                 if (loadingProgress() >= 1) bootDoneTime += dt;
                 const loaded = bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T;
                 if (loaded && Math.floor(bootTime / round) > Math.floor(before / round)) bootReady = true;
@@ -1558,23 +1567,34 @@
         }
 
         // --- LOADING screen (see BOOT_* and FROG_*) ---
-        // The frog's frames, in order (n = 1..FROG_FRAME_COUNT)
-        function frogSlot(n) { return "loading screen/Frog_" + String(FROG_FRAME_COUNT - n).padStart(4, "0") + "_Calque-" + n; }
+        // The frog's frames, in order (n = 1..24)
+        function frogSlot(n) { return "loading screen/Frog_" + String(FROG_FRAME_T.length - n).padStart(4, "0") + "_" + n; }
+        let frogFrame = 0;                 // the frame on screen (0-based)
+        let frogFrameTime = 0;             // how long it has been up (s)
+        // Moves the animation on: a frame of 0s is shown for exactly one screen refresh
+        function updateFrog(dt) {
+            const d = FROG_FRAME_T[frogFrame];
+            frogFrameTime += dt;
+            if (d > 0 && frogFrameTime < d) return;
+            frogFrameTime = d > 0 ? frogFrameTime - d : 0;
+            frogFrame = (frogFrame + 1) % FROG_FRAME_T.length;
+        }
 
         // VT323 for LOADING / ENTER: the text waits for it (no flash of another font), up to LOADING_MAX_T
+        const BOOT_FONT = BOOT_TEXT_PX + 'px "VT323"';
         let bootFontReady = false;
         if (document.fonts) document.fonts.load(BOOT_FONT, "LOADING ENTER").then(() => { bootFontReady = true; }, () => { bootFontReady = true; });
         else bootFontReady = true;
         setTimeout(() => { bootFontReady = true; }, LOADING_MAX_T * 1000);
 
         // Built once, on first use: the textured background with its vignette, a few grain
-        // patterns, the scanlines, and a scratch canvas for the bloom
+        // patterns, the scanlines, and scratch canvases for the picture and the text
         let bootLayers = null;
         function buildBootLayers() {
             const make = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
             // Background: the navy, each pixel nudged a little lighter or darker, then the vignette
             const bg = make(W, H), bgCtx = bg.getContext("2d");
-            const base = [parseInt(BOOT_BG.slice(1, 3), 16), parseInt(BOOT_BG.slice(3, 5), 16), parseInt(BOOT_BG.slice(5, 7), 16)];
+            const base = [1, 3, 5].map(i => parseInt(BOOT_BG.slice(i, i + 2), 16));
             const img = bgCtx.createImageData(W, H);
             for (let i = 0; i < img.data.length; i += 4) {
                 const n = Math.round(rand(-BOOT_BG_NOISE, BOOT_BG_NOISE));
@@ -1586,12 +1606,12 @@
             vignette.addColorStop(1, "rgba(0,0,0," + BOOT_VIGNETTE + ")");
             bgCtx.fillStyle = vignette;
             bgCtx.fillRect(0, 0, W, H);
-            // Grain: patterns of random grey pixels, one picked at random every 1-2 frames
+            // Grain: patterns of random grey pixels around mid-grey, one picked at random every 1-2 frames
             const grain = Array.from({ length: 4 }, () => {
                 const c = make(256, 256), g = c.getContext("2d"), d = g.createImageData(256, 256);
                 for (let i = 0; i < d.data.length; i += 4) {
-                    const v = Math.floor(Math.random() * 256);
-                    d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255;
+                    d.data[i] = d.data[i + 1] = d.data[i + 2] = Math.round(rand(128 - BOOT_GRAIN_SPREAD, 128 + BOOT_GRAIN_SPREAD));
+                    d.data[i + 3] = 255;
                 }
                 g.putImageData(d, 0, 0);
                 return ctx.createPattern(c, "repeat");
@@ -1600,58 +1620,70 @@
             const line = make(1, 3), lineCtx = line.getContext("2d");
             lineCtx.fillStyle = "rgba(0,0,0," + BOOT_SCANLINE_ALPHA + ")";
             lineCtx.fillRect(0, 2, 1, 1);
-            return { bg, grain, scanlines: ctx.createPattern(line, "repeat"), bloom: make(W, H) };
+            return { bg, grain, scanlines: ctx.createPattern(line, "repeat"), picture: make(W, H), text: make(W / BOOT_TEXT_SCALE, 60) };
         }
         let grainPick = { pattern: 0, x: 0, y: 0, frames: 0 }; // the grain pattern and offset on screen now
 
-        // The LOADING screen, back to front: background, the frog's light bleed then the frog,
-        // LOADING (or ENTER) with its glow, the bloom over all that, the scanlines, and the grain
-        // on top of everything. ctx.filter (the blurs) is skipped by browsers without it.
+        // The LOADING screen. The picture is put together off screen — background, the frog's
+        // glow then the frog, LOADING (or ENTER) with its glow, a touch of bloom — then laid on
+        // the screen very slightly blurred, with the scanlines and the grain on top of it all.
+        // ctx.filter (blurs, contrast...) is skipped by browsers that don't have it.
         function drawBoot() {
             if (!bootLayers) bootLayers = buildBootLayers();
-            const L = bootLayers;
-            ctx.drawImage(L.bg, 0, 0);
+            const L = bootLayers, pic = L.picture.getContext("2d");
+            pic.imageSmoothingEnabled = false;
+            pic.drawImage(L.bg, 0, 0);
 
-            const frame = assets[frogSlot(Math.floor(bootTime * FROG_FPS) % FROG_FRAME_COUNT + 1)];
+            const frame = assets[frogSlot(frogFrame + 1)];
             if (frame) {
-                const x = Math.round(FROG_POS.cx - frame.width / 2), y = FROG_POS.bottom - frame.height;
-                ctx.save();
-                ctx.filter = "blur(" + FROG_GLOW_BLUR + "px)";
-                ctx.globalAlpha = FROG_GLOW_ALPHA;
-                ctx.drawImage(frame, x, y);
-                ctx.filter = "blur(" + FROG_SOFT_BLUR + "px) contrast(" + FROG_CONTRAST + ")";
-                ctx.globalAlpha = 1;
-                ctx.drawImage(frame, x, y);
-                ctx.restore();
+                pic.save();
+                pic.globalCompositeOperation = "screen";
+                pic.filter = "blur(" + FROG_GLOW_BLUR + "px)";
+                pic.globalAlpha = FROG_GLOW_ALPHA;
+                pic.drawImage(frame, FROG_POS.x, FROG_POS.y);
+                pic.restore();
+                pic.save();
+                pic.filter = FROG_FILTER;
+                pic.drawImage(frame, FROG_POS.x, FROG_POS.y);
+                pic.restore();
             }
 
             if (bootFontReady) {
-                // LOADING with its dots appearing one by one (the word stays put), then ENTER
-                ctx.save();
-                ctx.font = BOOT_FONT;
-                ctx.textBaseline = "alphabetic";
-                ctx.textAlign = "left";
-                ctx.fillStyle = "#ffffff";
+                // LOADING with its dots appearing one by one (the word stays put), then ENTER:
+                // drawn small on its own canvas, then enlarged pixel for pixel, centered
+                const tc = L.text.getContext("2d");
+                tc.clearRect(0, 0, L.text.width, L.text.height);
+                tc.font = BOOT_FONT;
+                tc.textBaseline = "alphabetic";
+                tc.fillStyle = BOOT_TEXT_COLOR;
                 const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / BOOT_DOT_T) % 4);
-                const tx = Math.round(W / 2 - ctx.measureText(bootReady ? "ENTER" : "LOADING ...").width / 2);
-                ctx.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
-                ctx.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
-                ctx.fillText(text, tx, BOOT_TEXT_Y);
-                ctx.filter = "none";
-                ctx.globalAlpha = 1;
-                ctx.fillText(text, tx, BOOT_TEXT_Y);
-                ctx.restore();
+                const tw = tc.measureText(bootReady ? "ENTER" : "LOADING ...").width;
+                const base = 40; // the text's baseline on its canvas
+                tc.fillText(text, Math.round(L.text.width / 2 - tw / 2), base);
+                const x = W / 2 - L.text.width * BOOT_TEXT_SCALE / 2, y = BOOT_TEXT_Y - base * BOOT_TEXT_SCALE;
+                const w = L.text.width * BOOT_TEXT_SCALE, h = L.text.height * BOOT_TEXT_SCALE;
+                pic.save();
+                pic.globalCompositeOperation = "screen";
+                pic.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
+                pic.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
+                pic.drawImage(L.text, x, y, w, h);
+                pic.restore();
+                pic.save();
+                pic.globalAlpha = BOOT_TEXT_ALPHA;
+                pic.drawImage(L.text, x, y, w, h);
+                pic.restore();
             }
 
-            // Bloom: the whole picture, blurred, added back over itself
-            const bloomCtx = L.bloom.getContext("2d");
-            bloomCtx.clearRect(0, 0, W, H);
-            bloomCtx.drawImage(canvas, 0, 0);
+            // On screen: the picture very slightly softened, then a touch of bloom
+            ctx.fillStyle = BOOT_BG;
+            ctx.fillRect(0, 0, W, H); // under the soft edges of the blur
             ctx.save();
-            ctx.globalCompositeOperation = "lighter";
+            ctx.filter = "blur(" + BOOT_SOFTNESS + "px)";
+            ctx.drawImage(L.picture, 0, 0);
+            ctx.globalCompositeOperation = "screen";
             ctx.filter = "blur(" + BOOT_BLOOM_BLUR + "px)";
             ctx.globalAlpha = BOOT_BLOOM_ALPHA;
-            ctx.drawImage(L.bloom, 0, 0);
+            ctx.drawImage(L.picture, 0, 0);
             ctx.restore();
 
             ctx.fillStyle = L.scanlines;
