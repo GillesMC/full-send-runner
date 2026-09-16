@@ -58,9 +58,9 @@
            came from behind the screen. */
         #glow {
             position: absolute;
-            left: 00%;           /* left/top = -(width - 100%) / 2, to stay centered */
-            top: 00%;
-            width: 100%;          /* how far the glow spreads past the screen */
+            left: 0;              /* same spot and size as the screen: the blur spreads it past the edges */
+            top: 0;
+            width: 100%;          /* bigger = spreads further (then left/top = -(width - 100%) / 2 to stay centered) */
             height: 100%;
             filter: blur(48px) saturate(1.6) brightness(1.1); /* softness, color, strength */
             opacity: 0.7;         /* 0 = no glow, 1 = full */
@@ -172,7 +172,7 @@
         // (tobi, samurai, eye) carry their PSD position. Pixel art drawn 1:1, never
         // scaled. Listed back to front.
         // drift = the clouds creep right to left (px/s, the furthest one slowest) and come
-        // back in from the right once fully gone. blend = a blend mode for the layer (none use one now).
+        // back in from the right once fully gone.
         // leavesBehind = the far falling leaves are drawn right before this layer, so
         // they vanish behind it.
         const HOME_BACK_LAYERS = [
@@ -352,8 +352,6 @@
         const PORTAL_WAIT_T = 0.5;         // the left portal swirls open this long before the gummy comes out (s)
         const PORTAL_HOLD_T = 0.25;        // the left portal stays open this long once the gummy is out (s)
         const INTRO_GUMMY_SPEED = 460;     // run speed across the screen (px/s)
-        const INTRO_GUMMY_HOP_PX = 3;      // with a single run frame: a little hop instead of a leg cycle (px)
-        const INTRO_GUMMY_HOP_HZ = 5;      // hops per second
         const INTRO_FADE_T = 0.4;          // fade to black before the run (s)
 
         // --- Death sequence ---
@@ -400,11 +398,11 @@
         // --- Player sprites: the red gummy (gummy_run_1..N, gummy_jump, ...) ---
         // Pixel art, drawn at its NATIVE size, feet on the bottom of the hitbox.
         const RUN_FPS = 24;                // run cycle speed (frames per second): 30 frames = 1.25s
-        const RUN_FRAME_COUNT = 30;        // gummy_run_1..30 — they share one canvas, feet on its bottom
+        const RUN_FRAME_COUNT = 30;        // Gummy_run/gummy_run_1..30 — they share one canvas, feet on its bottom
         // edge and head at the same x, so they play back without any jitter
         const ANIM_FPS = 10;               // speed of the hold (jetpack) animation loop (frames per second)
         const HOLD_FRAME_COUNT = 3;        // number of gummy_hold_* frames
-        const DEBUG_HITBOX = true;         // true = draw the real collision box over the sprite (alignment check)
+        const DEBUG_HITBOX = false;        // true = draw the real collision box over the sprite (alignment check)
         // gummy_hurt is the one exception: the character is thrown through the air, so
         // it is anchored on the hitbox CENTER instead of on the feet.
 
@@ -445,17 +443,9 @@
         const GAP_WIDTH_MAX = 201;         // hole in the ground: max width (px)
 
         // --- Obstacle hitboxes ---
-        // HITBOX_MODE lets us A/B the two approaches asked for in the spec:
-        //   "body"  — a FIXED box on the creature's body, expressed as fractions of the
-        //             sprite frame. Wings and tail feathers are deliberately outside it.
-        //   "art"   — the box hugs the artwork's own opaque bounds, per frame.
-        // "body" is the default and the recommended one: the two pigeon frames have very
-        // different opaque bounds (frame 1: x=179 w=1831 h=1680, frame 2: x=0 w=2077
-        // h=1646), so "art" makes the hitbox jump around as the wings flap — exactly the
-        // offset we want gone. Both frames share a canvas, so a fixed box is rock steady.
-        const HITBOX_MODE = "body";
-        // Body box as fractions of the sprite frame {x0, y0, x1, y1}, measured on the
-        // overlap of the animation frames (head + torso, wings excluded).
+        // A FIXED box on the creature's body, as fractions of the sprite frame {x0, y0,
+        // x1, y1}, measured on the overlap of the animation frames: both frames share a
+        // canvas, so the box never moves with the animation.
         // Keys are the obstacle's own `type` ("ground" / "overhead").
         const OBSTACLE_BODY_BOX = {
             ground: { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 }, // koala: fills its frame, barely trimmed
@@ -506,7 +496,7 @@
         const FLASH_DURATION = 0.12;       // duration of screen flashes (s)
         const SHAKE_DURATION = 0.35;       // duration of screen shake on death (s)
         const SHAKE_STRENGTH = 7;          // max shake offset (px)
-        const RESTART_LOCK = 0.5;          // delay before the game-over screen accepts a restart input (s)
+        const RESTART_LOCK = 0.5;          // delay before the leaderboard (after a death) accepts a press (s)
         const SOUND_VOLUME = 0.07;         // master volume of the little beeps (0 = mute)
 
         /* =====================================================================
@@ -580,9 +570,9 @@
             "title", "katana", "samurai", "eye",
             // START sequence: the portal's swirl
             ...Array.from({ length: PORTAL_FRAME_COUNT }, (_, i) => "Portal/portal_" + (i + 1)),
-            // Player: the red gummy. The run cycle (gummy_run_1..RUN_FRAME_COUNT) is in;
+            // Player: the red gummy. The run cycle (Gummy_run/gummy_run_1..RUN_FRAME_COUNT) is in;
             // the other states fall back to the run frame until they are drawn.
-            ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => "gummy_run_" + (i + 1)),
+            ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => runSlot(i + 1)),
             "gummy_hold_1", "gummy_hold_2", "gummy_hold_3",
             "gummy_jump", "gummy_doublejump", "gummy_hurt",
             // Obstacles (2 animation frames each)
@@ -629,15 +619,72 @@
             // separately would make them jitter frame to frame.
         };
 
-        // Draws the slot image if it loaded (using its trim when measured).
+        // The part of a slot's image to draw: its SPRITE_TRIM rect (when the image is big
+        // enough to hold it: a trimmed export is drawn whole), else the whole image
+        function spriteRect(slot, img) {
+            const t = SPRITE_TRIM[slot];
+            return t && t.x + t.w <= img.width && t.y + t.h <= img.height ? t : { x: 0, y: 0, w: img.width, h: img.height };
+        }
+
+        // Draws the slot image stretched to (x, y, w, h), using its trim when measured.
         // Returns true if drawn, false so the caller draws the fallback shape.
         function drawSlot(name, x, y, w, h) {
             const img = assets[name];
             if (!img) return false;
-            const t = SPRITE_TRIM[name];
-            if (t) ctx.drawImage(img, t.x, t.y, t.w, t.h, x, y, w, h);
-            else ctx.drawImage(img, x, y, w, h);
+            const t = spriteRect(name, img);
+            ctx.drawImage(img, t.x, t.y, t.w, t.h, x, y, w, h);
             return true;
+        }
+
+        // Draws a slot's artwork at its native size (x scale when given) with its
+        // top-left corner on (x, y), snapped to whole pixels; flipX / flipY mirror it in
+        // place. False if the image is missing.
+        function drawNative(slot, x, y, flipX, flipY, scale) {
+            const img = assets[slot];
+            if (!img) return false;
+            const t = spriteRect(slot, img);
+            const w = Math.round(t.w * (scale || 1)), h = Math.round(t.h * (scale || 1));
+            x = Math.round(x);
+            y = Math.round(y);
+            ctx.save();
+            ctx.translate(x + (flipX ? w : 0), y + (flipY ? h : 0));
+            ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+            ctx.drawImage(img, t.x, t.y, t.w, t.h, 0, 0, w, h);
+            ctx.restore();
+            return true;
+        }
+
+        // Draws a slot's artwork centered on (cx, cy), x scale (nearest-neighbour), turned
+        // `quarter` quarter turns clockwise and mirrored left/right if asked. Quarter turns
+        // and mirrors only move whole pixels (the drawn width and height must be even).
+        function drawTurned(slot, cx, cy, quarter, mirror, scale) {
+            const img = assets[slot];
+            if (!img) return false;
+            const t = spriteRect(slot, img);
+            const w = Math.round(t.w * (scale || 1)), h = Math.round(t.h * (scale || 1));
+            const c = [1, 0, -1, 0][quarter], s = [0, 1, 0, -1][quarter], m = mirror ? -1 : 1;
+            ctx.save();
+            ctx.translate(Math.round(cx), Math.round(cy));
+            ctx.transform(m * c, s, -m * s, c, 0, 0);
+            ctx.drawImage(img, t.x, t.y, t.w, t.h, -w / 2, -h / 2, w, h);
+            ctx.restore();
+            return true;
+        }
+
+        // Artwork size of a slot (its SPRITE_TRIM rect when measured, known even before
+        // it loads), or the fallback while it is missing
+        function slotW(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.w : assets[slot] ? assets[slot].width : fallback; }
+        function slotH(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.h : assets[slot] ? assets[slot].height : fallback; }
+
+        // How many frames of a numbered animation (base_1, base_2, ...) actually loaded,
+        // up to max. Counted once every image has settled, then remembered.
+        const loadedFrameCounts = {};
+        function loadedFrames(base, max) {
+            if (base in loadedFrameCounts) return loadedFrameCounts[base];
+            let n = 0;
+            while (n < max && assets[base + "_" + (n + 1)]) n++;
+            if (allAssetsSettled()) loadedFrameCounts[base] = n;
+            return n;
         }
 
         // width/height ratio of a slot's VISIBLE artwork (trimmed if measured)
@@ -649,15 +696,13 @@
         }
 
         // Game state machine — one screen at a time:
-        // "boot" -> "home" -> "intro" -> "playing" -> "dying" -> "gameover" -> "leaderboard"
+        // "boot" -> "home" -> "intro" -> "playing" -> "dying" -> "leaderboard"
         let state = "boot";
         let bootTime = 0;              // time spent on the LOADING screen (s)
         let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
-        let homeTime = 0;              // time spent on the home screen (drives animations)
         let homeMenuTime = 0;          // time since PRESS START appeared (drives its fade-in)
         let introTime = 0;             // time elapsed in the intro cinematic (s)
         let deathTimer = 0;            // counts down the death mini-sequence
-        let menuIndexGameOver = 0;     // selected item on GAME OVER (0 = run again, 1 = leaderboard)
 
         // Best score, persisted in localStorage (wrapped in try/catch for file:// quirks)
         let bestScore = 0;
@@ -671,8 +716,8 @@
         let jumpBufferTimer = 0;   // time left on a buffered jump press
         let flashTimer = 0, flashColor = "#fff";
         let shakeTimer = 0, shakePower = SHAKE_STRENGTH;
-        let gameOverTime = 0;      // timestamp of death, used for the restart lock
-        let deathCause = "";       // short reason shown on the game-over screen
+        let gameOverTime = 0;      // when the leaderboard came up after a death, used for the restart lock
+        let deathCause = "";       // short reason shown under GAME OVER in the death sequence
         let squash = 1;            // visual-only vertical squash of the player (landing feedback)
         let fuel = 0;              // seconds of jetpack thrust left in the tank
         let jetPower = 0;          // 0..1, eased: how hard the jetpack boost is currently pushing
@@ -711,7 +756,7 @@
         }
 
         /* =====================================================================
-           AUDIO — tiny WebAudio beeps, no files needed
+           AUDIO — the AudioContext, and the little coded beeps (the sound files are in MIX below)
            ===================================================================== */
 
         let audioCtx = null;
@@ -722,6 +767,10 @@
             if (!mix && (audioCtx || MIX_ELEMENTS)) buildMix();
             if (audioCtx && audioCtx.state === "suspended" && soundUnlocked) audioCtx.resume();
         }
+
+        // Where the coded sounds go: the SFX bus of the mix (see MIX), or straight out
+        // in <audio> mode, which has no buses
+        function sfxOutput() { return mix && mix.sfx ? mix.sfx : audioCtx.destination; }
 
         // Plays a short beep. freqFrom/freqTo lets us do little pitch slides.
         function beep(freqFrom, freqTo, dur, type) {
@@ -734,7 +783,7 @@
             osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t + dur);
             gain.gain.setValueAtTime(SOUND_VOLUME, t);
             gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-            osc.connect(gain).connect(audioCtx.destination);
+            osc.connect(gain).connect(sfxOutput());
             osc.start(t);
             osc.stop(t + dur);
         }
@@ -763,7 +812,7 @@
             filter.type = "lowpass";
             filter.frequency.value = 500;
             gain.gain.value = SOUND_VOLUME * 0.9;
-            osc.connect(filter).connect(gain).connect(audioCtx.destination);
+            osc.connect(filter).connect(gain).connect(sfxOutput());
             osc.start();
             jetHum = { osc, gain };
         }
@@ -971,10 +1020,10 @@
            ===================================================================== */
 
         // --- Screen flow helpers ---
-        function goHome() { state = "home"; homeTime = 0; homeMenuTime = 0; }
-        // The home screen is "complete" once the logo has landed and every image has
-        // either loaded or been ruled missing. PRESS START only appears — and
-        // only responds — after that. Add any future title-screen animation to this check.
+        function goHome() { state = "home"; homeMenuTime = 0; }
+        // The home screen is "complete" once every image has either loaded or been ruled
+        // missing, and its font is in (see homeReady). PRESS START only appears — and only
+        // responds — after that, and the theme starts then.
         // The title screen's font: once its stylesheet is in, load the face itself; if it
         // never comes (offline), give up after LOADING_MAX_T and use the fallback.
         let fontSettled = false;
@@ -1023,22 +1072,6 @@
             };
         }
 
-        // Arrow up/down navigation inside menus
-        function menuMove(dir) {
-            if (state === "gameover") menuIndexGameOver = (menuIndexGameOver + dir + 2) % 2;
-            else return;
-            beep(500, 650, 0.05, "square"); // small navigation blip
-        }
-
-        // Menu rows vertical positions (used for drawing AND for click/tap selection)
-        const GAMEOVER_MENU_Y = [474, 535];
-
-        // Clicking/tapping picks the menu row closest to the click before confirming
-        function pickMenuFromClick(pos) {
-            if (!pos || state !== "gameover") return;
-            menuIndexGameOver = Math.abs(pos.y - GAMEOVER_MENU_Y[0]) <= Math.abs(pos.y - GAMEOVER_MENU_Y[1]) ? 0 : 1;
-        }
-
         // The single action button (Space / click / tap) — behavior depends on the screen
         function pressButton(clickPos) {
             if (paused && state === "playing") return; // frozen: only "P" resumes
@@ -1064,14 +1097,6 @@
 
                 case "dying":
                     return; // no input during the death sequence
-
-                case "gameover":
-                    if (performance.now() - gameOverTime < RESTART_LOCK * 1000) return;
-                    pickMenuFromClick(clickPos);
-                    beep(600, 900, 0.08, "square"); // confirm blip
-                    if (menuIndexGameOver === 0) startPlaying(); // restart: straight back in
-                    else state = "leaderboard";
-                    return;
 
                 case "leaderboard": {
                     // brief lock right after a death so the leaderboard isn't skipped by accident
@@ -1144,10 +1169,10 @@
             if (outOfFuel) sndJetEmpty();
         }
 
-        // Keyboard: Space/Enter = action button everywhere; ArrowUp = jump in game, navigate in menus
+        // Keyboard: Space / Enter / ArrowUp = the action button everywhere; P = pause
         window.addEventListener("keydown", (e) => {
             if (blocked) return; // the "get a PC" screen swallows every input
-            if (!["Space", "Enter", "ArrowUp", "ArrowDown", "KeyP"].includes(e.code)) return;
+            if (!["Space", "Enter", "ArrowUp", "KeyP"].includes(e.code)) return;
             e.preventDefault();
             if (e.repeat) return; // ignore auto-repeat, we handle "hold" ourselves
             if (e.code === "KeyP") {
@@ -1158,9 +1183,6 @@
                 }
                 return;
             }
-            const inMenu = state === "gameover";
-            if (e.code === "ArrowUp" && inMenu) { menuMove(-1); return; }
-            if (e.code === "ArrowDown") { if (inMenu) menuMove(1); return; }
             pressButton();
         });
         window.addEventListener("keyup", (e) => {
@@ -1181,16 +1203,7 @@
            ===================================================================== */
 
         function rand(min, max) { return min + Math.random() * (max - min); }
-
-        // Opaque bounds of each obstacle frame, as fractions of its own frame.
-        // Only used by HITBOX_MODE === "art", to demonstrate the wobble a per-frame
-        // hitbox produces: look at the pigeon, whose two frames disagree wildly.
-        const OBSTACLE_ART_BOX = {
-            "koala_running_1": { x0: 0.000, y0: 0.000, x1: 1.000, y1: 0.979 },
-            "koala_running_2": { x0: 0.000, y0: 0.000, x1: 1.000, y1: 0.979 },
-            "pigeon_1": { x0: 0.086, y0: 0.000, x1: 0.968, y1: 0.774 },
-            "pigeon_2": { x0: 0.000, y0: 0.242, x1: 1.000, y1: 1.000 }
-        };
+        function randIn(range) { return rand(range[0], range[1]); } // range = [min, max]
 
         // Base slot name for an obstacle type ("koala_running" / "pigeon")
         function obstacleBaseName(type) {
@@ -1199,10 +1212,7 @@
 
         // How many animation frames actually loaded for this obstacle type (0 = none)
         function obstacleFrameCount(type) {
-            const base = obstacleBaseName(type);
-            let n = 0;
-            while (assets[base + "_" + (n + 1)]) n++;
-            return n;
+            return loadedFrames(obstacleBaseName(type), 2);
         }
 
         // The slot to DRAW for this obstacle right now. The koala and the pigeon are
@@ -1223,21 +1233,10 @@
             return { x: o.x + o.dx, y: o.y + o.dy, w: o.fw, h: o.fh };
         }
 
-        // The obstacle's COLLISION box. In "body" mode this is simply x/y/w/h, a fixed
-        // box on the creature's body that never moves with the animation. In "art" mode
-        // it is recomputed from the current frame's opaque bounds instead.
+        // The obstacle's COLLISION box: its x/y/w/h, the fixed box on the creature's body
+        // (see OBSTACLE_BODY_BOX), which never moves with the animation
         function obstacleHitbox(o) {
-            if (HITBOX_MODE !== "art") return { x: o.x, y: o.y, w: o.w, h: o.h };
-            const slot = obstacleFrameSlot(o);
-            const box = slot && OBSTACLE_ART_BOX[slot];
-            if (!box) return { x: o.x, y: o.y, w: o.w, h: o.h };
-            const f = obstacleFrameRect(o);
-            return {
-                x: f.x + f.w * box.x0,
-                y: f.y + f.h * box.y0,
-                w: f.w * (box.x1 - box.x0),
-                h: f.h * (box.y1 - box.y0)
-            };
+            return { x: o.x, y: o.y, w: o.w, h: o.h };
         }
 
         // The pigeon's y for its current position along the screen. Both paths are
@@ -1312,11 +1311,10 @@
             if (roll < 0.45) {
                 // Ground obstacle (the koala cop): jump over it. The preset height is the
                 // BODY height; the frame around it is sized from the artwork's ratio.
-                const variant = Math.floor(Math.random() * KOALA_SIZES.length);
-                const s = KOALA_SIZES[variant];
+                const s = KOALA_SIZES[Math.floor(Math.random() * KOALA_SIZES.length)];
                 const m = obstacleFrameMetrics("ground", s.h);
                 const o = {
-                    type: "ground", variant, animOff: Math.random() * 10,
+                    type: "ground", animOff: Math.random() * 10,
                     x: spawnX, y: GROUND_Y - s.h, w: m.bodyW || s.w, h: s.h,
                     fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy
                 };
@@ -1326,15 +1324,14 @@
                 // Overhead obstacle (the pigeon): run under it (do NOT jump). The BODY's
                 // bottom edge always sits on the same clearance line, so it stays playable
                 // however far the wings stretch outside the frame.
-                const variant = Math.floor(Math.random() * PIGEON_SIZES.length);
-                const s = PIGEON_SIZES[variant];
+                const s = PIGEON_SIZES[Math.floor(Math.random() * PIGEON_SIZES.length)];
                 const m = obstacleFrameMetrics("overhead", s.h);
                 // baseY is the bird's LOWEST position: its bottom edge on the clearance
                 // line. Every flight path only ever lifts it above that, never below, so
                 // there is always room to run underneath.
                 const baseY = GROUND_Y - PLAYER_H - OVERHEAD_CLEARANCE - s.h;
                 const o = {
-                    type: "overhead", variant, animOff: Math.random() * 10,
+                    type: "overhead", animOff: Math.random() * 10,
                     x: spawnX, y: baseY, baseY, w: m.bodyW || s.w, h: s.h,
                     fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy,
                     motion: Math.random() < PIGEON_DIAGONAL_CHANCE ? "diagonal" : "wave",
@@ -1468,7 +1465,6 @@
                 if (loadingProgress() >= 1) bootDoneTime += dt;
                 if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) goHome();
             } else if (state === "home") {
-                homeTime += dt; // time on the title screen
                 if (homeReady()) {
                     homeMenuTime += dt; // PRESS START fades in
                     if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
@@ -1613,8 +1609,6 @@
 
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 const o = obstacles[i];
-                // obstacleHitbox() honours HITBOX_MODE, so switching modes changes what
-                // actually kills you without touching anything that is drawn.
                 if (invincibleTimer > 0 || !rectsOverlap(hb, obstacleHitbox(o))) continue;
                 if (loseHeart()) continue; // a spare heart absorbs the hit
                 die(o.type === "ground" ? "caught by a koala cop" : "hit by a pigeon");
@@ -1676,7 +1670,7 @@
             if (state === "intro") { drawIntro(); return; }
             if (state === "leaderboard") { drawLeaderboard(); return; }
 
-            // --- Below: the game world (states "playing", "dying" and "gameover") ---
+            // --- Below: the game world (states "playing" and "dying") ---
             ctx.save();
 
             // Screen shake offset (+ a constant rumble while the jetpack fires)
@@ -1734,7 +1728,7 @@
             // Debug overlay: green boxes = the REAL collision rects of everything
             // (player, obstacles, collectibles). Obstacles also get their sprite FRAME
             // outlined in faint blue, so the gap between art and hitbox is visible.
-            // Toggle with DEBUG_HITBOX; switch HITBOX_MODE to compare the two schemes.
+            // Toggle with DEBUG_HITBOX.
             if (DEBUG_HITBOX && state === "playing") {
                 drawHitboxDebug(); // player box
                 ctx.lineWidth = 2;
@@ -1748,10 +1742,6 @@
                 }
                 ctx.strokeStyle = "#00e050";
                 for (const c of collectibles) { const b = collectibleBox(c); ctx.strokeRect(b.x, b.y, b.w, b.h); }
-                ctx.fillStyle = "#00e050";
-                ctx.font = "bold 13px monospace";
-                ctx.textAlign = "right"; // bottom right, in the ground strip: clear of the runner
-                ctx.fillText("HITBOX: " + HITBOX_MODE, W - HUD_INSET_X, H - 20);
             }
 
             // --- Particles ---
@@ -1801,7 +1791,6 @@
 
             // --- Overlays on top of the (frozen) world ---
             if (state === "dying") drawDeathSequence();
-            if (state === "gameover") drawGameOverScreen();
 
             // --- Pause overlay (P) on top of everything in the window ---
             if (paused && state === "playing") drawPauseOverlay();
@@ -1925,7 +1914,7 @@
             // --- Sprite path (visuals only — the collision hitbox NEVER changes).
             // A state whose frame isn't drawn yet (jump, hold...) shows the run frame. ---
             let name = playerSpriteName();
-            if (!assets[name]) name = playerSpritePrefix() + "_run_1";
+            if (!assets[name]) name = runSlot(1);
             const img = assets[name];
             if (img) {
                 drawSpriteAnchored(img, name);
@@ -1959,10 +1948,13 @@
             }
         }
 
-        // The player's sprite set: the red gummy (gummy_run_1, gummy_jump, ...)
+        // The player's sprite set: the red gummy (gummy_jump, ...)
         function playerSpritePrefix() {
             return "gummy";
         }
+        // The run cycle's frames sit in their own folder, like the portal's: Gummy_run/gummy_run_n
+        function runBase() { return "Gummy_run/" + playerSpritePrefix() + "_run"; }
+        function runSlot(n) { return runBase() + "_" + n; }
 
         // Picks the sprite frame matching the current player state
         function playerSpriteName() {
@@ -1976,15 +1968,12 @@
                 if (player.jumpsUsed >= 2) return pre + "_doublejump"; // after the 2nd jump
                 return pre + "_jump";                                  // first jump / simple fall
             }
-            const f = Math.floor(runTime * RUN_FPS) % runFrameCount() + 1;
-            return pre + "_run_" + f; // running on the ground
+            return runSlot(Math.floor(runTime * RUN_FPS) % runFrameCount() + 1); // running on the ground
         }
 
         // Run frames actually delivered: the loop cycles over what exists (none = placeholder).
         function runFrameCount() {
-            let n = 0;
-            while (n < RUN_FRAME_COUNT && assets[playerSpritePrefix() + "_run_" + (n + 1)]) n++;
-            return n || RUN_FRAME_COUNT;
+            return loadedFrames(runBase(), RUN_FRAME_COUNT) || RUN_FRAME_COUNT;
         }
 
         // Draws a player sprite at its NATIVE size, centered on the hitbox, its bottom
@@ -2108,41 +2097,11 @@
            TITLE SCREEN — the forest
            The still layers back to front (HOME_BACK_LAYERS, the waterfall loop,
            HOME_FRONT_LAYERS), then what lives in them: falling leaves, the
-           meditating samurai and his katana, the koi. Everything is drawn at its
+           meditating samurai and his katana, the tancho koi. Everything is drawn at its
            native size on whole pixels, so the pixel art stays crisp.
            ===================================================================== */
 
         const HOME_SPLASH_T = 0.9;   // how long a koi splash lasts (s)
-
-        // Draws a slot's artwork at its native size (x scale when given) with its
-        // top-left corner on (x, y), snapped to whole pixels; flipX / flipY mirror it in
-        // place. Slots listed in SPRITE_TRIM draw only their artwork's rect (when the
-        // image is big enough to hold it: a trimmed export is drawn whole).
-        // False if the image is missing.
-        function spriteRect(slot, img) {
-            const t = SPRITE_TRIM[slot];
-            return t && t.x + t.w <= img.width && t.y + t.h <= img.height ? t : { x: 0, y: 0, w: img.width, h: img.height };
-        }
-        function drawNative(slot, x, y, flipX, flipY, scale) {
-            const img = assets[slot];
-            if (!img) return false;
-            const t = spriteRect(slot, img);
-            const w = Math.round(t.w * (scale || 1)), h = Math.round(t.h * (scale || 1));
-            x = Math.round(x);
-            y = Math.round(y);
-            ctx.save();
-            ctx.translate(x + (flipX ? w : 0), y + (flipY ? h : 0));
-            ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-            ctx.drawImage(img, t.x, t.y, t.w, t.h, 0, 0, w, h);
-            ctx.restore();
-            return true;
-        }
-
-        // Artwork size of a slot (its SPRITE_TRIM rect when measured, known even before
-        // it loads), or the fallback while it is missing
-        function slotW(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.w : assets[slot] ? assets[slot].width : fallback; }
-        function slotH(slot, fallback) { const t = SPRITE_TRIM[slot]; return t ? t.h : assets[slot] ? assets[slot].height : fallback; }
-        function randIn(range) { return rand(range[0], range[1]); }
 
         // --- The living scene. Set up once at load, then animated on the title
         //     screen AND during the START sequence, so nothing jumps when START is
@@ -2161,23 +2120,6 @@
         // Are rects {x, y, w, h} a and b closer than gap px?
         function rectsNear(a, b, gap) {
             return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
-        }
-
-        // Draws a slot's artwork centered on (cx, cy), x scale (nearest-neighbour), turned
-        // `quarter` quarter turns clockwise and mirrored left/right if asked. Quarter turns
-        // and mirrors only move whole pixels (the drawn width and height must be even).
-        function drawTurned(slot, cx, cy, quarter, mirror, scale) {
-            const img = assets[slot];
-            if (!img) return false;
-            const t = spriteRect(slot, img);
-            const w = Math.round(t.w * (scale || 1)), h = Math.round(t.h * (scale || 1));
-            const c = [1, 0, -1, 0][quarter], s = [0, 1, 0, -1][quarter], m = mirror ? -1 : 1;
-            ctx.save();
-            ctx.translate(Math.round(cx), Math.round(cy));
-            ctx.transform(m * c, s, -m * s, c, 0, 0);
-            ctx.drawImage(img, t.x, t.y, t.w, t.h, -w / 2, -h / 2, w, h);
-            ctx.restore();
-            return true;
         }
 
         // The kite at time t ({x, y, w, h}, flip = flying right: the art faces left): on
@@ -2239,11 +2181,15 @@
                 h: Math.round(slotH(HOME_KOI_JUMPER, 152) * HOME_KOI_JUMP_SCALE)
             };
         }
+        // How high the arc lifts it (px), so that its top is on JUMP_TOP when it levels out
+        function tanchoRise() {
+            const up = HOME_KOI_LEVEL_AT;
+            return (HOME_KOI_WATER_Y - HOME_KOI_JUMP_TOP) / (4 * up * (1 - up));
+        }
         function tanchoAt(j, t) {
             if (t < 0 || t > HOME_KOI_JUMP_T) return null;
             const { w, h } = tanchoSize(), up = HOME_KOI_LEVEL_AT;
-            const p = t / HOME_KOI_JUMP_T;
-            const rise = (HOME_KOI_WATER_Y - HOME_KOI_JUMP_TOP) / (4 * up * (1 - up)); // its top is on JUMP_TOP when it levels out
+            const p = t / HOME_KOI_JUMP_T, rise = tanchoRise();
             const cx = j.x0 + j.dir * HOME_KOI_JUMP_DX * p;   // a ballistic arc
             const cy = HOME_KOI_WATER_Y + h / 2 - rise * 4 * p * (1 - p);
             const quarter = p < up ? 0 : 1;
@@ -2355,7 +2301,6 @@
                 if (l.y > leafEnd(l)) dropLeaf(l);
             }
 
-
             // The tancho: waits, then leaps from a random one of HOME_KOI_JUMP_SHIFT, either
             // way, whatever is around — a splash each way.
             if (koiJump) {
@@ -2395,9 +2340,7 @@
                     x = -w + ((((x + w - L.drift * homeSceneTime) % period) + period) % period);
                 }
                 if (L.soar) ({ x, y, flip: flipX } = tobiAt(homeSceneTime)); // flying right: mirrored
-                if (L.blend) ctx.globalCompositeOperation = L.blend;
                 drawNative(L.slot, x, y, flipX);
-                ctx.globalCompositeOperation = "source-over";
             }
             // the kite over the temple, where it crosses it (see HOME_FAR_ZONE)
             const kite = tobiAt(homeSceneTime), Z = HOME_FAR_ZONE;
@@ -2534,8 +2477,7 @@
         // Middle of the tancho's top edge on the way up (head up), wherever the water line is,
         // and how fast it moves (px/s)
         function tanchoHead(j, t) {
-            const { h } = tanchoSize(), up = HOME_KOI_LEVEL_AT, p = t / HOME_KOI_JUMP_T;
-            const rise = (HOME_KOI_WATER_Y - HOME_KOI_JUMP_TOP) / (4 * up * (1 - up)); // as in tanchoAt
+            const p = t / HOME_KOI_JUMP_T, rise = tanchoRise();
             return {
                 x: j.x0 + j.dir * HOME_KOI_JUMP_DX * p,
                 y: HOME_KOI_WATER_Y - rise * 4 * p * (1 - p),
@@ -2575,11 +2517,11 @@
         const splashCanvas = document.createElement("canvas");
         splashCanvas.width = W;
         splashCanvas.height = H;
+        const splashCtx = splashCanvas.getContext("2d");
         function drawSplashes() {
             if (!splashes.length) return;
             const Y = HOME_KOI_WATER_Y, mask = assets["water_mask"];
-            const sctx = splashCanvas.getContext("2d");
-            sctx.clearRect(0, 0, W, H);
+            splashCtx.clearRect(0, 0, W, H);
             for (const s of splashes) {
                 const p = s.t / HOME_SPLASH_T;
                 // ripple rings: flat ellipses of whole pixels, spreading and fading out
@@ -2588,26 +2530,26 @@
                     if (q <= 0) continue;
                     const rx = (HOME_SPLASH_RING[0] + (HOME_SPLASH_RING[1] - HOME_SPLASH_RING[0]) * Math.sqrt(q)) * s.k;
                     const ry = Math.max(2, rx * 0.16);
-                    sctx.globalAlpha = 0.7 * (1 - q);
-                    sctx.fillStyle = HOME_SPLASH_COLORS[1];
+                    splashCtx.globalAlpha = 0.7 * (1 - q);
+                    splashCtx.fillStyle = HOME_SPLASH_COLORS[1];
                     for (let a = 0; a < Math.PI * 2; a += 2 / rx)
-                        sctx.fillRect(Math.round(s.x + Math.cos(a) * rx), Math.round(Y + 2 + Math.sin(a) * ry), 2, 1);
+                        splashCtx.fillRect(Math.round(s.x + Math.cos(a) * rx), Math.round(Y + 2 + Math.sin(a) * ry), 2, 1);
                 }
                 // foam: a white burst on the water line that shrinks away
                 if (p < 0.45) {
                     const fw = Math.round(34 * s.k * (1 - p / 0.45)), fh = Math.max(1, Math.round(6 * (1 - p / 0.45)));
-                    sctx.globalAlpha = 0.9;
-                    sctx.fillStyle = "#ffffff";
-                    sctx.fillRect(Math.round(s.x - fw / 2), Y - fh + 2, fw, fh);
-                    sctx.fillStyle = HOME_SPLASH_COLORS[2];
-                    sctx.fillRect(Math.round(s.x - fw / 2) - 3, Y + 1, fw + 6, 2);
+                    splashCtx.globalAlpha = 0.9;
+                    splashCtx.fillStyle = "#ffffff";
+                    splashCtx.fillRect(Math.round(s.x - fw / 2), Y - fh + 2, fw, fh);
+                    splashCtx.fillStyle = HOME_SPLASH_COLORS[2];
+                    splashCtx.fillRect(Math.round(s.x - fw / 2) - 3, Y + 1, fw + 6, 2);
                 }
             }
-            sctx.globalAlpha = 1;
+            splashCtx.globalAlpha = 1;
             if (mask) {
-                sctx.globalCompositeOperation = "destination-in"; // on water pixels only
-                sctx.drawImage(mask, 0, 0);
-                sctx.globalCompositeOperation = "source-over";
+                splashCtx.globalCompositeOperation = "destination-in"; // on water pixels only
+                splashCtx.drawImage(mask, 0, 0);
+                splashCtx.globalCompositeOperation = "source-over";
             }
             ctx.drawImage(splashCanvas, 0, 0);
             for (const s of splashes) {
@@ -2671,8 +2613,6 @@
         // transparent padding under it: enough to stand it on the ground at a
         // given character height, whatever its frame looks like.
         const STANDING_ART = { "koala_running": { fill: 0.979, bottom: 0.021 } };
-        const KOALA_BASE = "koala_running";
-        const KOALA_FRAMES = 2;
 
         // Draws a sprite so that its CHARACTER stands charH tall with its feet on
         // groundY; flip mirrors it horizontally around its own center.
@@ -2781,25 +2721,6 @@
             }
         }
 
-        // Shared menu renderer: highlights the selected row. shadow (optional) puts a
-        // drop shadow under every label, for text sitting on busy art.
-        function drawMenu(items, rowsY, selected, color, shadow) {
-            ctx.textAlign = "center";
-            for (let i = 0; i < items.length; i++) {
-                const isSel = i === selected;
-                ctx.font = isSel ? "bold 30px monospace" : "24px monospace";
-                const tw = ctx.measureText(items[i]).width;
-                const row = (d, fill) => {
-                    ctx.fillStyle = fill;
-                    ctx.fillText(items[i], W / 2 + d, rowsY[i] + d); // the label itself stays perfectly centered
-                    // selection arrow drawn separately so it doesn't shift the label
-                    if (isSel) ctx.fillText(">", W / 2 - tw / 2 - 26 + d, rowsY[i] + d);
-                };
-                if (shadow) row(2, shadow);
-                row(0, isSel ? "#ff3020" : color);
-            }
-        }
-
         // Draws one keyboard key cap: gray body, darker label for contrast
         function drawKeyCap(x, y, w, h, label) {
             ctx.fillStyle = "#909090";                 // key body
@@ -2812,7 +2733,7 @@
             ctx.fillText(label, x + w / 2, y + h / 2 + 4);
         }
 
-        // Controls reminder at the very bottom (home + in game): "JUMP =" + SPACE key cap
+        // Controls reminder at the bottom of the run: "JUMP =" + SPACE key cap
         function drawControlsHint(cy, captionColor) {
             ctx.globalAlpha = 0.85;
             ctx.font = "bold 12px monospace";
@@ -2834,8 +2755,8 @@
            is what makes him come out of the first one and vanish into the second.
            --------------------------------------------------------------------- */
 
-        function gummyWidth() { return slotW(playerSpritePrefix() + "_run_1", 74); }
-        function gummyRunSlot(t) { return playerSpritePrefix() + "_run_" + (Math.floor(t * RUN_FPS) % runFrameCount() + 1); }
+        function gummyWidth() { return slotW(runSlot(1), 74); }
+        function gummyRunSlot(t) { return runSlot(Math.floor(t * RUN_FPS) % runFrameCount() + 1); }
 
         // 0..1 size of a portal: opens from openAt, closes from closeAt
         function portalScale(t, openAt, closeAt) {
@@ -2846,9 +2767,7 @@
 
         // Portal frames actually delivered (the swirl loops over what exists)
         function portalFrameCount() {
-            let n = 0;
-            while (n < PORTAL_FRAME_COUNT && assets["Portal/portal_" + (n + 1)]) n++;
-            return n;
+            return loadedFrames("Portal/portal", PORTAL_FRAME_COUNT);
         }
 
         // A portal — the swirl's frame for time t — centered on (cx, PORTAL_CENTER_Y):
@@ -2891,16 +2810,13 @@
                 drawPortal(PORTAL_RIGHT_X, portalScale(t, tl.rightOpen, tl.arrive), PORTAL_RIGHT_FLIP, t);
                 if (!running) return;
                 const slot = gummyRunSlot(rt);
-                // Only one run frame so far: a little hop stands in for the legs
-                const hop = runFrameCount() === 1
-                    ? Math.round(Math.abs(Math.sin(rt * Math.PI * INTRO_GUMMY_HOP_HZ)) * INTRO_GUMMY_HOP_PX) : 0;
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(PORTAL_LEFT_X, 0, PORTAL_RIGHT_X - PORTAL_LEFT_X, H);
                 ctx.clip();
-                if (!drawNative(slot, x, GROUND_Y - slotH(slot, 0) - hop)) {
+                if (!drawNative(slot, x, GROUND_Y - slotH(slot, 0))) {
                     ctx.fillStyle = "#e01010"; // placeholder gummy
-                    ctx.fillRect(Math.round(x), GROUND_Y - PLAYER_H - hop, PLAYER_W, PLAYER_H);
+                    ctx.fillRect(Math.round(x), GROUND_Y - PLAYER_H, PLAYER_W, PLAYER_H);
                 }
                 ctx.restore();
             }, peek);
@@ -2945,7 +2861,7 @@
                 const kp = p / DEATH_CATCH_FRAC;
                 const kEase = kp * (0.75 + 0.25 * kp);       // steady charge, closing a little faster
                 const koalaX = W * DEATH_KOALA_FROM + (cx - W * DEATH_KOALA_FROM) * kEase;
-                const koalaSlot = loopFrame(KOALA_BASE, KOALA_FRAMES, DEATH_KOALA_FPS, elapsed);
+                const koalaSlot = loopFrame(obstacleBaseName("ground"), Math.max(1, obstacleFrameCount("ground")), DEATH_KOALA_FPS, elapsed);
                 // Running RIGHT, against the artwork's own facing => mirrored
                 drawStandingSprite(koalaSlot, koalaX, GROUND_Y, DEATH_KOALA_H, true);
 
@@ -2994,28 +2910,6 @@
             ctx.fillStyle = "#f0e0d0";
             ctx.font = "17px monospace";
             ctx.fillText("(" + deathCause + ")", W / 2, goY + 44);
-        }
-
-        // NOTE: currently unused — the flow now goes dying -> leaderboard directly.
-        // Kept around in case we bring a game-over menu back later.
-        function drawGameOverScreen() {
-            ctx.fillStyle = "rgba(10,5,8,0.85)";
-            ctx.fillRect(0, 0, W, H);
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#ff3020";
-            ctx.font = "bold 54px monospace";
-            ctx.fillText("demon got me", W / 2, 170);
-            ctx.fillStyle = "#f0e0d0";
-            ctx.font = "14px monospace";
-            ctx.fillText("(" + deathCause + ")", W / 2, 200);
-            ctx.font = "bold 26px monospace";
-            ctx.fillText("SCORE " + Math.floor(score), W / 2, 260);
-            ctx.font = "18px monospace";
-            ctx.fillText("BEST  " + bestScore, W / 2, 292);
-            // Menu appears once the short restart lock has passed (avoids accidental restarts)
-            if (performance.now() - gameOverTime > RESTART_LOCK * 1000) {
-                drawMenu(["RUN AGAIN", "LEADERBOARD"], GAMEOVER_MENU_Y, menuIndexGameOver, "#f0e0d0");
-            }
         }
 
         /* =====================================================================
