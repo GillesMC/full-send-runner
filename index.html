@@ -268,29 +268,11 @@
         const HOME_LEAF_MEMORY = 4;        // ...where the last this many came down
         const HOME_LEAF_SMALL = 0.62;      // front leaves smaller than this (x leaf_1) are the small, further back ones
         const HOME_LEAF_HIDDEN_Y = 555;    // front.png's ledge edge is above this all across (532..554): a small leaf whose top is past it is out of sight (px)
-        // The koi (koi_2.png, drawn level: head to the side) passes through the pond now and
-        // then, always level. It comes up from under the bottom of the screen while already
-        // swimming forward, swims straight across the DARK water, then goes back down out of
-        // the screen the same way, still swimming forward. Its swim line is just under the
-        // rock / water edge (HOME_POND_TOP) all along it, and a trip is only taken if the
-        // whole koi stays under that edge and in the dark water on the way up and down too.
-        // It never swims under the tancho's leaps: no part of its trip crosses the columns
-        // any leap can reach (see HOME_KOI_JUMP_*). Mirrored when it swims the other way. It
-        // pays no attention to anything else (it swims under the floating flowers and the
-        // leaves) and is cut at HOME_POND_TOP.
-        const HOME_KOI = "koi_2";
-        const HOME_KOI_FACES = -1;         // which way its head points in koi_2.png: 1 = right, -1 = left
-        const HOME_KOI_ZONE = [0, 1040];   // its left and right edges always stay in here: the dark water, left of the pale pool under the waterfall (px)
-        const HOME_KOI_SWIM = [120, 400];  // how far it swims level, on its swim line (px)
-        const HOME_KOI_SLANT = [0.4, 2.5]; // coming up / going down: px it swims forward per px up or down (drawn per trip: steep enough to come up between the rocks)
-        const HOME_KOI_SPEED = 8;          // px/s
-        const HOME_KOI_GAP = [4, 10];      // pause between two trips (s)
-        const HOME_KOI_TRIES = 300;        // trips drawn at random each time, until one fits (few do: it only has the left of the pond)
         // The tancho koi is the only one that leaps: out of the pond in an arc, in front of
         // the ledge. Two poses: head up on the way up, then level (head forward) from just
         // before the top of the arc until it is back in the water. It is scaled
         // nearest-neighbour and only turned by quarter turns, so its pixels stay square. It
-        // leaps whatever is around (leaves, floating flowers, koi), and splashes when it breaks
+        // leaps whatever is around (leaves, floating flowers), and splashes when it breaks
         // the water, out and back in. Coming out, water rides up on its head and back
         // (HOME_KOI_WATER_*) and is only thrown off around half the height of the leap.
         const HOME_KOI_JUMPER = "tancho_koi"; // head up in the art
@@ -592,7 +574,7 @@
             // Title screen: the forest, named after its PSD layers (see HOME_BACK_LAYERS & co.)
             "sky", "cloud_1", "cloud_2", "cloud_3", "cloud_4", "landscape", "tobi",
             "background", "rocks", "front", "water_mask",
-            "leaf_1", "cherry_blossom", "koi_2", "tancho_koi",
+            "leaf_1", "cherry_blossom", "tancho_koi",
             ...HOME_FLOATERS.map(f => f.slot),
             "title", "katana", "samurai", "eye",
             // START sequence: the portal's swirl
@@ -738,8 +720,11 @@
             if (!audioCtx) {
                 try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { }
             }
+            if (audioCtx && !mix) buildMix();
             if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
         }
+        // Browsers keep audio off until the first click / key: any of them turns it on
+        ["pointerdown", "keydown", "touchend"].forEach(type => window.addEventListener(type, ensureAudio, true));
 
         // Plays a short beep. freqFrom/freqTo lets us do little pitch slides.
         function beep(freqFrom, freqTo, dur, type) {
@@ -795,6 +780,133 @@
         }
 
         /* =====================================================================
+           MIX — the title screen's music and sounds (assets/music/*.wav)
+           Two buses, MUSIC and SFX, into MASTER, then a safety limiter so the sum
+           never clips. A missing or undecodable file just stays silent.
+           ===================================================================== */
+
+        // --- Volumes (0..1): tweak these ---
+        const MIX_MASTER = 0.9;            // everything (the limiter adds back ~+0.9 dB)
+        const MIX_MUSIC = 1.0;             // MUSIC bus: the title theme
+        const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
+        const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
+        const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
+        // --- Feel ---
+        const MIX_FADE_IN = 2.5;           // the theme fades in as the title screen appears (s)
+        const MIX_SKIP_FADE = 0.4;         // everything fades out this fast when the START sequence is skipped (s)
+        const MIX_VARY_GAIN = [0.85, 1];   // each splash a little louder or softer (x its volume)...
+        const MIX_VARY_RATE = [0.96, 1.04]; // ...and a little higher or lower (playback rate)
+        const MIX_PAN = 0.3;               // stereo: a sound at the edge of the screen sits this far to that side (0..1)
+        // --- Files and timing ---
+        const SOUND_FILES = {
+            theme: "music/theme",
+            tanchoJump: "music/tancho_koi_jump",
+            tanchoSplash: "music/tancho_koi_splash"
+        };
+        // Where the sound actually hits in each file (s): it is lined up so that this
+        // moment, not the start of the file, lands on the frame it goes with.
+        const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09 };
+
+        let mix = null;            // {master, music, sfx}: the gain buses, built with the AudioContext
+        const sounds = {};         // decoded AudioBuffers by name (see SOUND_FILES)
+        let titleMusic = null;     // the theme's looping source while it plays
+        let titleMusicWanted = false; // the title screen is up: the theme plays as soon as it is decoded
+
+        function buildMix() {
+            const limiter = audioCtx.createDynamicsCompressor();
+            limiter.threshold.value = -1.5;
+            limiter.knee.value = 0;
+            limiter.ratio.value = 20;
+            limiter.attack.value = 0.003;
+            limiter.release.value = 0.25;
+            limiter.connect(audioCtx.destination);
+            mix = { master: audioCtx.createGain(), music: audioCtx.createGain(), sfx: audioCtx.createGain() };
+            mix.master.gain.value = MIX_MASTER;
+            mix.music.gain.value = 0;
+            mix.sfx.gain.value = MIX_SFX;
+            mix.master.connect(limiter);
+            mix.music.connect(mix.master);
+            mix.sfx.connect(mix.master);
+            for (const [name, file] of Object.entries(SOUND_FILES)) {
+                fetch("assets/" + file + ".wav")
+                    .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+                    .then(data => new Promise((ok, fail) => audioCtx.decodeAudioData(data, ok, fail)))
+                    .then(buffer => {
+                        sounds[name] = buffer;
+                        if (name === "theme" && titleMusicWanted) titleAudioIn();
+                    })
+                    .catch(() => { /* missing file (or opened from file://): that sound stays silent */ });
+            }
+        }
+
+        // Moves a gain smoothly from where it is now to `to` over `dur` s
+        function fadeGain(param, to, dur) {
+            const t = audioCtx.currentTime;
+            param.cancelScheduledValues(t);
+            param.setValueAtTime(param.value, t);
+            param.linearRampToValueAtTime(to, t + Math.max(0.01, dur));
+        }
+
+        // The title screen appears: the theme starts from the top and fades in, looping
+        // seamlessly (the buffer loops sample-exact); the scene's sounds are back on.
+        function titleAudioIn() {
+            titleMusicWanted = true;
+            if (!mix || !sounds.theme) return; // not decoded yet: buildMix calls this again when it is
+            if (titleMusic) { try { titleMusic.stop(); } catch (e) { } }
+            titleMusic = audioCtx.createBufferSource();
+            titleMusic.buffer = sounds.theme;
+            titleMusic.loop = true;
+            titleMusic.connect(mix.music);
+            mix.music.gain.cancelScheduledValues(audioCtx.currentTime);
+            mix.music.gain.setValueAtTime(0, audioCtx.currentTime);
+            fadeGain(mix.music.gain, MIX_MUSIC, MIX_FADE_IN);
+            fadeGain(mix.sfx.gain, MIX_SFX, 0.05);
+            titleMusic.start();
+        }
+
+        // Leaving the title screen: the theme and the scene's sounds fade out over `dur` s
+        // (called again mid-fade, e.g. the sequence skipped, it just ends sooner)
+        function titleAudioOut(dur) {
+            titleMusicWanted = false;
+            if (!mix || !titleMusic) return;
+            if (titleMusic.fading && titleMusic.fading <= audioCtx.currentTime + dur) return; // already gone by then
+            fadeGain(mix.music.gain, 0, dur);
+            fadeGain(mix.sfx.gain, 0, dur);
+            titleMusic.fading = audioCtx.currentTime + dur;
+            try { titleMusic.stop(titleMusic.fading + 0.05); } catch (e) { }
+        }
+
+        // How long before its moment a sound must be started: its hit, plus the time the
+        // audio takes to reach the speakers
+        function soundLead(name) {
+            const out = audioCtx ? (audioCtx.outputLatency || audioCtx.baseLatency || 0) : 0;
+            return SOUND_HIT[name] + Math.min(out, 0.1);
+        }
+
+        // Plays one scene sound on the SFX bus, panned after x (px on screen), a little
+        // different every time. skip = s of the file to jump over (to land its hit right now).
+        function playSfx(name, volume, x, skip) {
+            const buffer = sounds[name];
+            if (!mix || !buffer || audioCtx.state !== "running" || volume <= 0) return;
+            const t = audioCtx.currentTime;
+            const src = audioCtx.createBufferSource();
+            src.buffer = buffer;
+            src.playbackRate.value = randIn(MIX_VARY_RATE);
+            const gain = audioCtx.createGain();
+            const v = volume * randIn(MIX_VARY_GAIN);
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(v, t + 0.005); // no click, even when started mid-file
+            let node = src.connect(gain);
+            if (audioCtx.createStereoPanner) {
+                const pan = audioCtx.createStereoPanner();
+                pan.pan.value = Math.max(-1, Math.min(1, (x / W * 2 - 1) * MIX_PAN));
+                node = node.connect(pan);
+            }
+            node.connect(mix.sfx);
+            src.start(t, Math.max(0, skip || 0));
+        }
+
+        /* =====================================================================
            JUICE HELPERS
            ===================================================================== */
 
@@ -825,7 +937,7 @@
            ===================================================================== */
 
         // --- Screen flow helpers ---
-        function goHome() { state = "home"; homeTime = 0; homeMenuTime = 0; }
+        function goHome() { state = "home"; homeTime = 0; homeMenuTime = 0; titleAudioIn(); }
         // The home screen is "complete" once the logo has landed and every image has
         // either loaded or been ruled missing. PRESS START only appears — and
         // only responds — after that. Add any future title-screen animation to this check.
@@ -846,7 +958,7 @@
             introTime = 0;
             sndPortal();
         }
-        function startPlaying() { resetRun(); state = "playing"; }
+        function startPlaying() { resetRun(); state = "playing"; titleAudioOut(MIX_SKIP_FADE); } // skipped: the title mix goes quickly (already gone otherwise)
 
         // Key moments of the START sequence (s since START), from the constants above
         // and the gummy's own width:
@@ -1341,7 +1453,10 @@
                 const before = introTime;
                 introTime += dt;
                 const tl = introTimeline();
-                if (before < tl.rightOpen && introTime >= tl.rightOpen) sndPortal();
+                if (before < tl.rightOpen && introTime >= tl.rightOpen) {
+                    sndPortal();
+                    titleAudioOut(tl.end - tl.rightOpen); // the title mix fades out with the gummy's run, gone as the screen goes black
+                }
                 if (before < tl.arrive && introTime >= tl.arrive) sndWhoosh();
                 if (introTime >= tl.end) startPlaying();
             } else if (state === "dying") {
@@ -2014,7 +2129,6 @@
         let homeSceneTime = 0;     // the scene's own clock (s)
         let leaves = [];           // {cx, y, w, h, fall, sway, speed, phase, far, slot, size, wait} — cx = center of the sway
         let leafSpawnXs = [];      // where the last leaves came down (center x), newest last
-        let koi = { trip: null, leg: 0, x: 0, y: 0, wait: 2 }; // see planKoiTrip: x, y = its top-left corner; wait = time before the next trip (s)
         let tanchoWater = [];      // the droplets riding up with the tancho, then thrown off (see HOME_KOI_WATER_*)
         let koiJump = null;        // the tancho's leap in progress {t, x0, dir}, or null
         let koiJumpWait = 2.5;     // time before the next leap (s) — the first one comes early
@@ -2220,36 +2334,14 @@
                 if (l.y > leafEnd(l)) dropLeaf(l);
             }
 
-            // The koi: waits, then takes a trip through the pond, leg after leg, at its pace
-            if (!koi.trip) {
-                if ((koi.wait -= dt) <= 0) {
-                    for (let n = 0; n < HOME_KOI_TRIES && !koi.trip; n++) koi.trip = planKoiTrip();
-                    koi.wait = 1; // no trip fits right now: it tries again in a moment
-                    if (koi.trip) {
-                        koi.x = koi.trip.points[0].x;
-                        koi.y = koi.trip.points[0].y;
-                        koi.leg = 1;
-                    }
-                }
-            } else {
-                for (let step = HOME_KOI_SPEED * dt; step > 0 && koi.trip; ) {
-                    const to = koi.trip.points[koi.leg], d = Math.hypot(to.x - koi.x, to.y - koi.y);
-                    if (d > step) {
-                        koi.x += (to.x - koi.x) / d * step;
-                        koi.y += (to.y - koi.y) / d * step;
-                        break;
-                    }
-                    koi.x = to.x;
-                    koi.y = to.y;
-                    step -= d;
-                    if (++koi.leg >= koi.trip.points.length) { koi.trip = null; koi.wait = randIn(HOME_KOI_GAP); }
-                }
-            }
 
             // The tancho: waits, then leaps from a random one of HOME_KOI_JUMP_SHIFT, either
             // way, whatever is around — a splash each way.
             if (koiJump) {
+                const before = koiJump.t;
                 koiJump.t += dt;
+                const dive = HOME_KOI_JUMP_T - soundLead("tanchoSplash"); // started early so its hit lands as it hits the water
+                if (before < dive && koiJump.t >= dive) playSfx("tanchoSplash", MIX_TANCHO_SPLASH, koiJump.x0 + koiJump.dir * HOME_KOI_JUMP_DX);
                 if (koiJump.t >= HOME_KOI_JUMP_T) {
                     splashes.push(makeSplash(koiJump.x0 + koiJump.dir * HOME_KOI_JUMP_DX, true));
                     koiJump = null;
@@ -2260,6 +2352,7 @@
                 const dir = Math.random() < 0.5 ? 1 : -1;
                 koiJump = { t: 0, dir, x0: HOME_KOI_JUMP_CX + shift - dir * HOME_KOI_JUMP_DX / 2 };
                 splashes.push(makeSplash(koiJump.x0, false));
+                playSfx("tanchoJump", MIX_TANCHO_JUMP, koiJump.x0, soundLead("tanchoJump")); // its lead-in skipped: the hit is now
                 tanchoWater = makeTanchoWater();
                 lookTime = -1; // the scene changed (the leaves keep out of its way)
             }
@@ -2509,64 +2602,9 @@
             ctx.globalAlpha = 1;
         }
 
-        // The lowest rock / water edge over columns x0..x1
-        function koiEdge(x0, x1) {
-            let y = 0;
-            for (let c = Math.max(0, Math.floor(x0)); c <= Math.min(W - 1, Math.ceil(x1)); c++) y = Math.max(y, pondTopCol[c]);
-            return y;
-        }
-        // The columns the tancho's leaps can reach, whatever the shift and the side: [left, right] (px)
-        function tanchoColumns() {
-            const { w, h } = tanchoSize(), reach = Math.max(w, h) / 2 + HOME_KOI_JUMP_DX / 2;
-            return [HOME_KOI_JUMP_CX + Math.min(...HOME_KOI_JUMP_SHIFT) - reach, HOME_KOI_JUMP_CX + Math.max(...HOME_KOI_JUMP_SHIFT) + reach];
-        }
-        // A trip for the koi drawn at random, or null if it does not fit: {dir, points} — its
-        // top-left corner under the bottom of the screen, where it is level on its swim line,
-        // where it leaves that line, and under the bottom of the screen again. dir 1 = heading right.
-        function planKoiTrip() {
-            const img = assets[HOME_KOI];
-            if (!img) return null;
-            const w = img.width, h = img.height, Z = HOME_KOI_ZONE, T = tanchoColumns();
-            const dir = Math.random() < 0.5 ? 1 : -1, len = randIn(HOME_KOI_SWIM);
-            if (Z[1] - w - len < Z[0]) return null;
-            const left = rand(Z[0], Z[1] - w - len);                 // the left end of its swim
-            const from = dir > 0 ? left : left + len, to = dir > 0 ? left + len : left;
-            const y = koiEdge(left, left + len + w) + 2;             // its swim line: under the edge all along (it bobs 1px)
-            if (y > H - h / 2) return null;                          // not even half of it in sight
-            const out = H + 2, run = (out - y) * randIn(HOME_KOI_SLANT); // how far it swims on while coming up / going down
-            const points = [{ x: from - dir * run, y: out }, { x: from, y }, { x: to, y }, { x: to + dir * run, y: out }];
-            for (let i = 0; i < 3; i++) {
-                const a = points[i], b = points[i + 1];
-                for (let k = 0; k <= 16; k++) {
-                    const x = a.x + (b.x - a.x) * k / 16, top = a.y + (b.y - a.y) * k / 16;
-                    if (x < Z[0] || x + w > Z[1] || top - 1 < koiEdge(x, x + w)) return null;
-                    if (x + w > T[0] && x < T[1]) return null;       // under the tancho's leaps
-                }
-            }
-            return { dir, points };
-        }
-
-        // Clip to the pond: below HOME_POND_TOP, the rock / water edge
-        function clipToPond() {
-            ctx.beginPath();
-            ctx.moveTo(0, H);
-            HOME_POND_TOP.forEach(([x, y], i) => {
-                ctx.lineTo(x, y);
-                ctx.lineTo(i + 1 < HOME_POND_TOP.length ? HOME_POND_TOP[i + 1][0] : W, y);
-            });
-            ctx.lineTo(W, H);
-            ctx.clip();
-        }
-        // The pond: the koi under the floating flowers, then the leaping tancho, the water
-        // riding up with it and its splashes
+        // The pond: the floating flowers, then the leaping tancho, the water riding up with it
+        // and its splashes
         function drawKois() {
-            if (koi.trip && assets[HOME_KOI]) {
-                ctx.save();
-                clipToPond();
-                const bob = Math.round(Math.sin(homeSceneTime * 1.3)); // ±1px
-                drawNative(HOME_KOI, koi.x, koi.y + bob, koi.trip.dir !== HOME_KOI_FACES); // swimming the other way: mirrored
-                ctx.restore();
-            }
             for (const f of floatersAt(homeSceneTime)) drawNative(f.slot, f.x, f.y);
             const leap = koiJump && tanchoAt(koiJump, koiJump.t);
             if (leap) {
