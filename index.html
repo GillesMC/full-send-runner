@@ -569,7 +569,7 @@
         const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
         const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
-        const MIX_SAMURAI_HM = 0.6;        // the samurai's "hm" as he opens his eye on the gummy
+        const MIX_SAMURAI_HM = 0.6;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
         // --- Feel ---
         const MIX_FADE_IN = 2.5;           // the theme fades in when it starts (s), then never stops
         const MIX_VARY_GAIN = [0.85, 1];   // each splash a little louder or softer (x its volume)...
@@ -601,6 +601,11 @@
         // The run cycle's frames where a foot lands (Gummy_run/gummy_run_n: its ground contact
         // jumps forward). Measure again if the frames change.
         const GUMMY_STEP_FRAMES = [1, 5, 10, 14, 18, 21, 25, 28];
+        // hm.wav holds the samurai's two "hm"s (s, measured on the file): the first one as he
+        // opens his eye, the second one as he has closed it again — it starts with a soft
+        // breath in, its "hm" comes at 0.90. Measure again if the file changes.
+        const SAMURAI_HM_OPEN = { start: 0, length: 0.32 };
+        const SAMURAI_HM_CLOSE = { start: 0.76, length: 0.36 };
         // Opened straight from the disk (file://), the browser refuses to load sound files
         // into the Web Audio mix: the sounds then play through plain <audio> elements
         // instead — same volumes, fade-in and timing, only no stereo panning and no limiter.
@@ -888,9 +893,12 @@
             crossingTime += dt;
             const tl = crossingTimeline();
             if (before < tl.rightOpen && crossingTime >= tl.rightOpen) portalSound(PORTAL_RIGHT_X, tl.arrive - tl.rightOpen);
-            // The samurai's "hm", started early so it is heard as his eye opens
-            const hm = tl.eyeOpen - soundLead("samuraiHm");
-            if (before < hm && crossingTime >= hm) playSfx("samuraiHm", MIX_SAMURAI_HM, HOME_EYE.x);
+            // The samurai's "hm"s, started early so they are heard as his eye opens, and as it
+            // closes again (with the right portal: the end of the crossing)
+            const hmLead = soundLead("samuraiHm");
+            for (const [at, hm] of [[tl.eyeOpen, SAMURAI_HM_OPEN], [tl.end, SAMURAI_HM_CLOSE]])
+                if (before < at - hmLead && crossingTime >= at - hmLead)
+                    playSfx("samuraiHm", MIX_SAMURAI_HM, HOME_EYE.x, hm.start, hm.length);
             // A footstep on every frame of the run where a foot lands, started early so it is
             // heard as that frame shows, panned after where the gummy is then
             const lead = soundLead("gummyStep");
