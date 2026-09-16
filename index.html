@@ -774,17 +774,17 @@
                 node = node.connect(pan);
             }
             node.connect(sfxOutput());
-            out.connect(gain(PORTAL_REVERB)).connect(portalReverb);
+            out.connect(gain(PORTAL_REVERB)).connect(filter("lowpass", 2200, 0.7)).connect(portalReverb); // a darker hall
 
             // Opening blast: the sub boom...
             const boom = osc("sine", 110), boomGain = gain(0);
             ramp(boom.frequency, t, 110, [32, t + 0.6]);
-            ramp(boomGain.gain, t, 0.0001, [0.9, t + 0.02], [0.0001, t + 0.7]);
+            ramp(boomGain.gain, t, 0.0001, [0.9, t + 0.04], [0.0001, t + 0.7]);
             play(boom, t, t + 0.8).connect(boomGain).connect(out);
             // ...and the burst of noise
-            const blast = noise(), blastFilter = filter("lowpass", 300, 1.5), blastGain = gain(0);
-            ramp(blastFilter.frequency, t, 300, [7000, t + 0.12], [600, t + 0.9]);
-            ramp(blastGain.gain, t, 0.0001, [0.7, t + 0.04], [0.0001, t + 1]);
+            const blast = noise(), blastFilter = filter("lowpass", 300, 0.7), blastGain = gain(0);
+            ramp(blastFilter.frequency, t, 300, [2500, t + 0.15], [500, t + 0.9]);
+            ramp(blastGain.gain, t, 0.0001, [0.8, t + 0.08], [0.0001, t + 1]);
             play(blast, t, t + 1.05, Math.random()).connect(blastFilter).connect(blastGain).connect(out);
 
             // The hum while it is open: two saws a little apart through a wobbling low-pass,
@@ -794,24 +794,24 @@
             hum.gain.setValueAtTime(0.28, hold);
             hum.gain.exponentialRampToValueAtTime(0.0001, closed);
             hum.connect(out);
-            const humFilter = filter("lowpass", 520, 4);
+            const humFilter = filter("lowpass", 460, 1.5);
             humFilter.connect(hum);
             for (const f of [98, 99.3]) play(osc("sawtooth", f), t, closed + 0.05).connect(humFilter);
             const wobble = play(osc("sine", 0.7), t, closed + 0.05);
             wobble.connect(gain(400)).connect(humFilter.detune);
             const shimmer = noise(), tremble = gain(0.5);
-            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 2800, 6)).connect(tremble).connect(gain(0.18)).connect(hum);
+            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 1400, 4)).connect(tremble).connect(gain(0.1)).connect(hum);
             play(osc("sine", 11), t, closed + 0.05).connect(gain(0.5)).connect(tremble.gain);
 
             // Closing suck, ending as the portal is fully closed...
-            const suck = noise(), suckFilter = filter("lowpass", 200, 2), suckGain = gain(0);
-            ramp(suckFilter.frequency, hold, 200, [5000, closed]);
-            ramp(suckGain.gain, hold, 0.0001, [0.45, closed - 0.02], [0.0001, closed + 0.03]);
-            play(suck, hold, closed + 0.05, Math.random()).connect(suckFilter).connect(suckGain).connect(out);
+            const suck = noise(), suckFilter = filter("lowpass", 200, 0.7), suckGain = gain(0);
+            ramp(suckFilter.frequency, hold, 200, [1800, closed]);
+            ramp(suckGain.gain, hold, 0.0001, [0.5, closed - 0.03], [0.0001, closed + 0.1]);
+            play(suck, hold, closed + 0.12, Math.random()).connect(suckFilter).connect(suckGain).connect(out);
             // ...and the thunk
             const thunk = osc("sine", 70), thunkGain = gain(0);
             ramp(thunk.frequency, closed, 70, [28, closed + 0.3]);
-            ramp(thunkGain.gain, closed, 0.0001, [0.7, closed + 0.01], [0.0001, closed + 0.35]);
+            ramp(thunkGain.gain, closed, 0.0001, [0.7, closed + 0.03], [0.0001, closed + 0.35]);
             play(thunk, closed, closed + 0.4).connect(thunkGain).connect(out);
         }
 
