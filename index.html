@@ -604,6 +604,7 @@
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
         const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
         const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
+        const PORTAL_CHIMES = 0.12;        // the portal's little bells (its magic touch): 0 = none
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
         const MIX_PRESS_START = 1.0;       // a press on PRESS START
         const MIX_SAMURAI_HM = 1.0;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
@@ -863,6 +864,24 @@
             const shimmer = noise(), swell = gain(0.7);
             play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 1400, 4)).connect(swell).connect(gain(0.1)).connect(hum);
             play(osc("sine", 1.5), t, closed + 0.05).connect(gain(0.3)).connect(swell.gain);
+
+            // The magic touch: little bells from A major, the hum's key (it is A and E) — a quick
+            // run up as it opens, a few twinkles at random while it is open, a run down as it closes.
+            // A bell: a sine with a faint note two octaves up, ringing out.
+            const bells = [880, 1108.7, 1318.5, 1760, 2217.5, 2637];
+            const bell = (at, f, v) => {
+                const ring = gain(0);
+                ramp(ring.gain, at, 0.0001, [v, at + 0.005], [0.0001, at + 0.45]);
+                ring.connect(out);
+                play(osc("sine", f), at, at + 0.5).connect(ring);
+                play(osc("sine", f * 4), at, at + 0.5).connect(gain(0.15)).connect(ring);
+            };
+            if (PORTAL_CHIMES > 0) {
+                bells.forEach((f, i) => bell(t + 0.05 + i * 0.06, f, PORTAL_CHIMES));
+                for (let at = t + 0.6; at < hold - 0.1; at += rand(0.15, 0.3))
+                    bell(at, bells[2 + Math.floor(Math.random() * 4)], PORTAL_CHIMES * 0.5);
+                bells.slice().reverse().forEach((f, i) => bell(hold + i * 0.05, f, PORTAL_CHIMES * (1 - i / 8)));
+            }
 
             // Closing suck, ending as the portal is fully closed...
             const suck = noise(), suckFilter = filter("lowpass", 200, 0.7), suckGain = gain(0);
