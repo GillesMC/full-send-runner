@@ -237,7 +237,10 @@
         const HOME_ALERT_OUTLINE = "#1a1a1a";
         // Falling leaves: leaf_1 (and now and then a cherry_blossom) drifting down and
         // swaying, mirrored each time the sway turns back (pixel-perfect flip, no
-        // rotation). Two depths: FRONT leaves fall in front of the whole forest; FAR
+        // rotation). Three depths: BIG front leaves fall in front of the whole forest (and
+        // of the samurai) down to the bottom of the screen; SMALL front ones (under
+        // HOME_LEAF_SMALL) are a little further back: they go behind the rocks, the ledge,
+        // the katana and the samurai, and are gone once they are behind the ledge; FAR
         // ones are smaller and slower and fall BEHIND background.png (only seen through
         // the gaps in the trees). Sizes are whole-pixel, nearest-neighbour. They start
         // where the PSD has them (+ a few far ones), then respawn above the screen.
@@ -261,39 +264,47 @@
         const HOME_LEAF_GAP = 6;           // the closest a leaf ever comes to anything else that moves (px)
         const HOME_LEAF_SPREAD = 130;      // a new leaf comes down at least this far (px) from...
         const HOME_LEAF_MEMORY = 4;        // ...where the last this many came down
+        const HOME_LEAF_SMALL = 0.62;      // front leaves smaller than this (x leaf_1) are the small, further back ones
+        const HOME_LEAF_HIDDEN_Y = 555;    // front.png's ledge edge is above this all across (532..554): a small leaf whose top is past it is out of sight (px)
         // Koi swimming slowly back and forth, drawn normally (their colours are in the art).
         // Each one moves along `axis` — the way its head points in the art — between min
         // and max px from its master spot (x, y; w x h = its size); swimming back, it turns
-        // round: "mirror" = flipped left/right, "rotate" = turned 180° (the diagonal koi_1).
-        // min / max keep every pixel of it (both ways round, bob included) on the DARK water:
-        // never on the pale water under the log, the white foam or a rock. They were
-        // measured on water_mask.png + front.png: measure again if either changes. A koi never
-        // bumps into anything: it turns back when a floating flower, a leaf or a fish is in
-        // its way, and when it is hemmed in on both sides it dives (fades out) and comes back
-        // up a little later, somewhere along its path where the water is clear.
+        // round: "mirror" = flipped left/right, "diagonal" = mirrored across its other
+        // diagonal (the diagonal koi_1: head up-right, still the same side up).
+        // They stay on the DARK water (measured on water_mask.png + front.png: measure again
+        // if either changes) and pay no attention to anything else: they swim under the
+        // floating flowers, the leaves and the tancho. They are cut at HOME_POND_TOP, so
+        // nothing of them ever shows over a rock.
+        // hideAt = turn round out of sight at that end instead: "out" = it swims on until it
+        // is fully off the bottom of the screen (max 92 for koi_1, both ways round), "dive" =
+        // it fades out, turns and comes back up the other way round (min -8 for koi_1: the
+        // last spot where it is whole on the dark water, both ways round).
         const HOME_KOI_SWIMMERS = [
-            { slot: "koi_1", x: 929, y: 660, w: 56, h: 50, axis: [0.74, -0.67], min: -30, max: 14, speed: 6, turn: "rotate" },
-            { slot: "koi_2", x: 616, y: 682, w: 47, h: 35, axis: [1, 0], min: -44, max: 20, speed: 9, turn: "mirror" }
+            { slot: "koi_1", x: 929, y: 662, w: 56, h: 50, axis: [-0.74, 0.67], min: -8, max: 92, speed: 6, turn: "diagonal", hideAt: { min: "dive", max: "out" } },
+            { slot: "koi_2", x: 556, y: 682, w: 47, h: 35, axis: [1, 0], min: -44, max: 20, speed: 6, turn: "mirror" }
         ];
-        const HOME_KOI_LOOK = 10;          // how far ahead a koi looks for something in its way (px)
         const HOME_KOI_DIVE_T = 0.6;       // a koi fades out (dives) / back in (comes up) in this long (s)
+        const HOME_KOI_HIDE_T = [1, 3];    // how long a koi stays out of sight before it comes back (s)
         // The tancho koi is the only one that leaps: out of the pond in an arc, in front of
-        // the ledge. Two poses: head up on the way up, turned 180° (head down) from the top
-        // of the arc. It is scaled nearest-neighbour and only turned half a turn, so its
-        // pixels stay square. It only leaps where nothing is in its way (leaves, floating
-        // flowers, koi), and splashes when it breaks the water, out and back in.
+        // the ledge. Three poses: head up on the way up, level (head forward) over the top
+        // of the arc, head down on the way down. It is scaled nearest-neighbour and only
+        // turned by quarter turns, so its pixels stay square. It leaps whatever is around (leaves, floating flowers, koi),
+        // and splashes when it breaks the water, out (with a spout that rises with it) and back in.
         const HOME_KOI_JUMPER = "tancho_koi"; // head up in the art
         const HOME_KOI_JUMP_SCALE = 1.25;  // its size (x tancho_koi.png): 102x152 -> 128x190
         const HOME_KOI_JUMP_CX = 601;      // its center at the top of the arc (px) — the master's spot
-        const HOME_KOI_JUMP_TOP = 440;     // its top edge at the top of the arc (px) — under PRESS START
+        const HOME_KOI_JUMP_TOP = 440;     // its highest top edge, as it levels out (px) — under PRESS START
         const HOME_KOI_JUMP_SHIFT = [0, 40, -30, 80, 120]; // it may leap this far (px) from that spot (not further left: the katana)
         const HOME_KOI_JUMP_DX = 80;       // how far it travels sideways during a leap (px)
         const HOME_KOI_WATER_Y = 704;      // water line it leaps from and dives back into (px)
         const HOME_KOI_JUMP_T = 1.5;       // duration of a leap (s)
+        const HOME_KOI_LEVEL = [0.4, 0.6]; // it is level (head forward) between these shares of the leap
         const HOME_KOI_JUMP_GAP = [5, 10]; // pause between two leaps (s)
         // Its splashes, coded: droplets thrown up in a crown that fall back into the pond,
         // a white foam burst on the water line and flat ripple rings spreading out.
         const HOME_SPLASH_DROPS = 16;      // droplets per splash
+        const HOME_SPLASH_SPOUT = 12;      // extra droplets thrown straight up as it comes out
+        const HOME_SPLASH_SPOUT_SPEED = [170, 230]; // their launch speed (px/s): all back in the pond within HOME_SPLASH_T
         const HOME_SPLASH_SPEED = [70, 190]; // droplet launch speed range (px/s)
         const HOME_SPLASH_GRAVITY = 520;   // pulls the droplets back down (px/s²)
         const HOME_SPLASH_RING = [18, 70]; // ripple ring half-width, from..to (px)
@@ -2006,7 +2017,6 @@
         let lookCache = [], lookTime = -1; // sceneAt's answers, for the current frame
 
         const HOME_LOOK_STEP = 0.1; // s between two looks when a path is played ahead
-        const shuffled = a => a.map(v => [Math.random(), v]).sort((p, q) => p[0] - q[0]).map(p => p[1]);
         // Are rects {x, y, w, h} a and b closer than gap px?
         function rectsNear(a, b, gap) {
             return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
@@ -2081,7 +2091,7 @@
 
         // --- The tancho's leap j = {x0, dir}: x0 = its center as it leaves the water ---
         // At time t into the leap: {x, y, w, h} = what shows above the water, cx / cy = its
-        // center, quarter = 0 head up (first half) or 2 head down (second half); null under water
+        // center, quarter = quarter turns (0 head up, 1 level, 2 head down); null under water
         function tanchoSize() {
             return {
                 w: Math.round(slotW(HOME_KOI_JUMPER, 102) * HOME_KOI_JUMP_SCALE),
@@ -2090,30 +2100,16 @@
         }
         function tanchoAt(j, t) {
             if (t < 0 || t > HOME_KOI_JUMP_T) return null;
-            const { w, h } = tanchoSize();
+            const { w, h } = tanchoSize(), up = HOME_KOI_LEVEL[0];
             const p = t / HOME_KOI_JUMP_T;
-            const rise = HOME_KOI_WATER_Y - HOME_KOI_JUMP_TOP; // its top is on JUMP_TOP at the top of the arc
+            const rise = (HOME_KOI_WATER_Y - HOME_KOI_JUMP_TOP) / (4 * up * (1 - up)); // its top is on JUMP_TOP when it levels out
             const cx = j.x0 + j.dir * HOME_KOI_JUMP_DX * p;   // a ballistic arc
             const cy = HOME_KOI_WATER_Y + h / 2 - rise * 4 * p * (1 - p);
-            const quarter = p < 0.5 ? 0 : 2;
-            const top = cy - h / 2;
+            const quarter = p < up ? 0 : p < HOME_KOI_LEVEL[1] ? 1 : 2;
+            const rw = quarter === 1 ? h : w, rh = quarter === 1 ? w : h; // level: lying on its side
+            const top = cy - rh / 2;
             if (top >= HOME_KOI_WATER_Y) return null;
-            return { x: cx - w / 2, y: top, w, h: Math.min(h, HOME_KOI_WATER_Y - top), cx, cy, quarter };
-        }
-        // Is leap j clear all the way: nothing in the air along its arc, nothing on the
-        // water where it breaks through (a floating flower)? null if not; otherwise the koi
-        // that are up where it breaks through ([] = none, it can go)
-        function tanchoLeapKoi(j) {
-            const w = tanchoSize().w;
-            const splash = x => ({ x: x - w / 4, y: HOME_KOI_WATER_Y - 14, w: w / 2, h: 28 }); // its body where it breaks the water
-            const out = splash(j.x0), back = splash(j.x0 + j.dir * HOME_KOI_JUMP_DX);
-            for (let k = 0; k * HOME_LOOK_STEP <= HOME_KOI_JUMP_T; k++) {
-                const tau = k * HOME_LOOK_STEP, f = tanchoAt(j, tau);
-                const rs = [tau < 0.3 ? out : tau > HOME_KOI_JUMP_T - 0.3 ? back : null, f].filter(Boolean);
-                for (const o of sceneAt(k)) for (const r of rs) if (rectsNear(r, o.r, HOME_LEAF_GAP)) return null;
-            }
-            return kois.filter(k => k.mode !== "hidden" && assets[k.slot] &&
-                (rectsNear(koiRect(k, k.s), out, 12) || rectsNear(koiRect(k, k.s), back, 12)));
+            return { x: cx - rw / 2, y: top, w: rw, h: Math.min(rh, HOME_KOI_WATER_Y - top), cx, cy, quarter };
         }
 
         // --- Falling leaves ---
@@ -2123,27 +2119,14 @@
             slot = slot || (Math.random() < HOME_BLOSSOM_CHANCE ? "cherry_blossom" : "leaf_1");
             size = size || randIn(far ? HOME_LEAF_FAR_SIZE : HOME_LEAF_SIZE);
             return {
-                far, slot, size, cx: 0, y: 0, phase: 0, wait: 0, behind: false,
+                far, slot, size, cx: 0, y: 0, phase: 0, wait: 0, small: !far && size < HOME_LEAF_SMALL,
                 w: Math.round(slotW(slot, 40) * size), h: Math.round(slotH(slot, 45) * size),
                 fall: randIn(HOME_LEAF_FALL) * size, sway: randIn(HOME_LEAF_SWAY) * size,
                 speed: randIn(HOME_LEAF_SWAY_SPEED)
             };
         }
-        // A leaf that passes behind the samurai or his katana stays behind them: it comes
-        // down on the grass behind him (it is cut off at GROUND_Y, the line he sits on)
-        // instead of reappearing in front of the ledge. Its fall ends there.
-        const HOME_BEHIND_RECTS = [
-            { x: HOME_SAMURAI.x, y: HOME_SAMURAI.y, w: 298, h: GROUND_Y - HOME_SAMURAI.y }, // samuraï.png
-            { x: 422, y: 349, w: 35, h: GROUND_Y - 349 }                                     // katana.png's art
-        ];
-        function leafEnd(l) { return l.behind ? GROUND_Y : H; }
-        function leafGoesBehind(l) {
-            for (let tau = 0; ; tau += HOME_LOOK_STEP / 2) {
-                const r = leafRect(l, tau);
-                if (r.y >= GROUND_Y) return false;
-                if (HOME_BEHIND_RECTS.some(b => rectsNear(r, b, 0))) return true;
-            }
-        }
+        // Where a leaf's fall ends: a small one once it is fully behind the ledge, the others off the screen
+        function leafEnd(l) { return l.small ? HOME_LEAF_HIDDEN_Y : H; }
         // Where leaf l will be tau s from now
         function leafRect(l, tau) {
             return { x: l.cx + Math.sin(l.phase + l.speed * tau) * l.sway - l.w / 2, y: l.y + l.fall * tau, w: l.w, h: l.h };
@@ -2165,7 +2148,6 @@
         }
         // Does leaf l's whole fall, until it is off the screen, keep HOME_LEAF_GAP from all that?
         function leafPathClear(l) {
-            l.behind = !l.far && leafGoesBehind(l);
             for (let k = 0; ; k++) {
                 const r = leafRect(l, k * HOME_LOOK_STEP);
                 if (r.y >= leafEnd(l)) return true;
@@ -2190,20 +2172,6 @@
                 }
             }
             lookTime = -1; // the scene changed
-        }
-
-        // --- Koi ---
-        function koiRect(k, s) { return { x: k.x + k.axis[0] * s, y: k.y + k.axis[1] * s - 1, w: k.w, h: k.h + 2 }; } // + its 1px bob
-        // Would koi k, at rect r, touch something within `ahead` s: a floater, a leaf, the
-        // leaping tancho, another koi that is up?
-        function koiBlocked(k, r, ahead) {
-            for (let tau = 0; tau <= ahead; tau += 0.25) {
-                for (const f of floatersAt(homeSceneTime + tau)) if (rectsNear(r, f, 2)) return true;
-                for (const l of leaves) if (!l.wait && l.y + l.fall * tau < leafEnd(l) && rectsNear(r, leafRect(l, tau), 2)) return true;
-                const j = koiJump && tanchoAt(koiJump, koiJump.t + tau);
-                if (j && rectsNear(r, j, 2)) return true;
-            }
-            return kois.some(o => o !== k && o.mode !== "hidden" && assets[o.slot] && rectsNear(r, koiRect(o, o.s), 2));
         }
 
         function initHomeScene() {
@@ -2246,36 +2214,33 @@
                 if (l.y > leafEnd(l)) dropLeaf(l);
             }
 
-            // Swimmers: back and forth along their axis; they turn back at each end or when
-            // something is in the way, dive when hemmed in, and come back up where it is clear
+            // Swimmers: back and forth along their axis, whatever is around. At an end they
+            // turn round there, or out of sight (hideAt): off the bottom of the screen, or diving
+            // and coming back up the other way round.
             for (const k of kois) {
                 if (!assets[k.slot]) continue; // not exported yet
-                const clampS = s => Math.max(k.min, Math.min(k.max, s));
                 if (k.mode === "swim") {
-                    const free = d => (d > 0 ? k.s < k.max : k.s > k.min) &&
-                        !koiBlocked(k, koiRect(k, clampS(k.s + d * HOME_KOI_LOOK)), 1);
-                    if (!free(k.dir)) k.dir = -k.dir;
-                    if (free(k.dir)) k.s = clampS(k.s + k.dir * k.speed * dt);
-                    else k.mode = "dive";
-                } else if (k.mode === "dive") {
-                    if ((k.alpha -= dt / HOME_KOI_DIVE_T) <= 0) { k.alpha = 0; k.mode = "hidden"; k.wait = rand(1, 3); }
-                } else if (k.mode === "hidden") {
-                    if ((k.wait -= dt) <= 0) {
-                        const s = rand(k.min, k.max);
-                        if (koiBlocked(k, koiRect(k, s), 2.5)) k.wait = 0.5;
-                        else { k.s = s; k.dir = Math.random() < 0.5 ? 1 : -1; k.mode = "rise"; }
+                    k.s += k.dir * k.speed * dt;
+                    const end = k.dir > 0 ? "max" : "min";
+                    if (k.dir > 0 ? k.s >= k.max : k.s <= k.min) {
+                        k.s = k[end];
+                        const hide = k.hideAt && k.hideAt[end];
+                        if (hide === "dive") k.mode = "dive";
+                        else if (hide === "out") { k.mode = "hidden"; k.wait = randIn(HOME_KOI_HIDE_T); }
+                        else k.dir = -k.dir;
                     }
-                } else if (koiBlocked(k, koiRect(k, k.s), 1)) {
-                    k.mode = "dive"; // coming up, and something is on its way: back down
+                } else if (k.mode === "dive") {
+                    if ((k.alpha -= dt / HOME_KOI_DIVE_T) <= 0) { k.alpha = 0; k.mode = "hidden"; k.wait = randIn(HOME_KOI_HIDE_T); }
+                } else if (k.mode === "hidden") {
+                    if ((k.wait -= dt) <= 0) { k.dir = -k.dir; k.mode = "rise"; } // turned round out of sight
                 } else if ((k.alpha += dt / HOME_KOI_DIVE_T) >= 1) {
-                    k.alpha = 1;
+                    k.alpha = 1; // off the screen it never faded: straight back to swimming
                     k.mode = "swim";
                 }
             }
 
-            // The tancho: waits, then leaps from a spot where its whole arc is clear (a
-            // random one of HOME_KOI_JUMP_SHIFT, either way) — a splash each way. If only
-            // koi are in its way, they dive out of sight and it leaps once they are gone.
+            // The tancho: waits, then leaps from a random one of HOME_KOI_JUMP_SHIFT, either
+            // way, whatever is around — a splash each way.
             if (koiJump) {
                 koiJump.t += dt;
                 if (koiJump.t >= HOME_KOI_JUMP_T) {
@@ -2284,22 +2249,11 @@
                     koiJumpWait = randIn(HOME_KOI_JUMP_GAP);
                 }
             } else if ((koiJumpWait -= dt) <= 0) {
-                koiJumpWait = 0.5; // busy everywhere: it looks again in a moment
-                let inTheWay = null;
-                search: for (const shift of shuffled(HOME_KOI_JUMP_SHIFT)) {
-                    for (const dir of shuffled([1, -1])) {
-                        const j = { t: 0, dir, x0: HOME_KOI_JUMP_CX + shift - dir * HOME_KOI_JUMP_DX / 2 };
-                        const koi = tanchoLeapKoi(j);
-                        if (!koi) continue;
-                        if (koi.length) { inTheWay = inTheWay || koi; continue; }
-                        koiJump = j;
-                        splashes.push(makeSplash(j.x0, false));
-                        lookTime = -1; // the scene changed
-                        inTheWay = null;
-                        break search;
-                    }
-                }
-                if (inTheWay) for (const k of inTheWay) if (k.mode !== "dive") k.mode = "dive";
+                const shift = HOME_KOI_JUMP_SHIFT[Math.floor(Math.random() * HOME_KOI_JUMP_SHIFT.length)];
+                const dir = Math.random() < 0.5 ? 1 : -1;
+                koiJump = { t: 0, dir, x0: HOME_KOI_JUMP_CX + shift - dir * HOME_KOI_JUMP_DX / 2 };
+                splashes.push(makeSplash(koiJump.x0, false));
+                lookTime = -1; // the scene changed (the leaves keep out of its way)
             }
             for (const s of splashes) s.t += dt;
             splashes = splashes.filter(s => s.t < HOME_SPLASH_T);
@@ -2310,7 +2264,7 @@
             ctx.fillStyle = "#56dbfd"; // sky.png's own color, also the placeholder while it loads
             ctx.fillRect(0, 0, W, H);
             for (const L of HOME_BACK_LAYERS) {
-                if (L.leavesBehind) drawLeaves(true);
+                if (L.leavesBehind) drawLeaves("far");
                 let x = L.x || 0, y = L.y || 0, flipX = false;
                 if (L.drift) {
                     // right to left, back in from the right once fully gone
@@ -2322,6 +2276,7 @@
                 drawNative(L.slot, x, y, flipX);
                 ctx.globalCompositeOperation = "source-over";
             }
+            drawLeaves("small"); // further back: behind the rocks and the ledge
             for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x || 0, L.y || 0);
             drawHomeWater();
         }
@@ -2439,17 +2394,19 @@
         }
 
         // A splash where the tancho breaks the water at x: its droplets are drawn once, at
-        // random, when it starts. entry = diving back in (a little bigger).
+        // random, when it starts. entry = diving back in (a little bigger); coming out, a
+        // spout of droplets is also thrown straight up, as if pulled out with it.
         function makeSplash(x, entry) {
             const k = entry ? 1.2 : 1;
-            const drops = Array.from({ length: Math.round(HOME_SPLASH_DROPS * k) }, () => {
-                const a = Math.PI * rand(0.12, 0.88), v = randIn(HOME_SPLASH_SPEED) * k; // a crown, mostly upward
-                return {
-                    x: rand(-14, 14), vx: Math.cos(a) * v, vy: -Math.sin(a) * v,
-                    size: Math.random() < 0.3 ? 3 : 2,
-                    color: HOME_SPLASH_COLORS[Math.floor(Math.random() * HOME_SPLASH_COLORS.length)]
-                };
+            const drop = (dx, a, v) => ({
+                x: dx, vx: Math.cos(a) * v, vy: -Math.sin(a) * v,
+                size: Math.random() < 0.3 ? 3 : 2,
+                color: HOME_SPLASH_COLORS[Math.floor(Math.random() * HOME_SPLASH_COLORS.length)]
             });
+            const drops = Array.from({ length: Math.round(HOME_SPLASH_DROPS * k) },
+                () => drop(rand(-14, 14), Math.PI * rand(0.12, 0.88), randIn(HOME_SPLASH_SPEED) * k)); // a crown, mostly upward
+            if (!entry) for (let i = 0; i < HOME_SPLASH_SPOUT; i++)
+                drops.push(drop(rand(-10, 10), Math.PI * rand(0.42, 0.58), randIn(HOME_SPLASH_SPOUT_SPEED)));
             return { x, t: 0, k, drops };
         }
         // The rings and the foam are drawn on their own canvas and cut to water_mask (like
@@ -2505,17 +2462,39 @@
             ctx.globalAlpha = 1;
         }
 
-        // The pond: the swimmers (faded while they dive) under the floating flowers, then
-        // the leaping tancho and its splashes
+        // Clip to the pond: below HOME_POND_TOP, the rock / water edge
+        function clipToPond() {
+            ctx.beginPath();
+            ctx.moveTo(0, H);
+            HOME_POND_TOP.forEach(([x, y], i) => {
+                ctx.lineTo(x, y);
+                ctx.lineTo(i + 1 < HOME_POND_TOP.length ? HOME_POND_TOP[i + 1][0] : W, y);
+            });
+            ctx.lineTo(W, H);
+            ctx.clip();
+        }
+        // The pond: the swimmers (faded while they dive, cut where they go behind a rock)
+        // under the floating flowers, then the leaping tancho and its splashes
         function drawKois() {
+            ctx.save();
+            clipToPond();
             for (let i = 0; i < kois.length; i++) {
                 const k = kois[i];
-                if (k.alpha <= 0) continue;
+                if (k.alpha <= 0 || k.mode === "hidden") continue;
                 const bob = Math.round(Math.sin(homeSceneTime * 1.3 + i * 2)); // ±1px
                 const back = k.dir < 0;                                       // swimming back: turned round
+                const x = Math.round(k.x + k.axis[0] * k.s), y = Math.round(k.y + k.axis[1] * k.s) + bob;
                 ctx.globalAlpha = k.alpha;
-                drawNative(k.slot, k.x + k.axis[0] * k.s, k.y + k.axis[1] * k.s + bob, back, back && k.turn === "rotate");
+                if (back && k.turn === "diagonal" && assets[k.slot]) {
+                    // mirrored across its other diagonal, around its center: x and y swap
+                    ctx.save();
+                    ctx.translate(x + k.w / 2, y + k.h / 2);
+                    ctx.transform(0, 1, 1, 0, 0, 0);
+                    ctx.drawImage(assets[k.slot], -k.w / 2, -k.h / 2);
+                    ctx.restore();
+                } else drawNative(k.slot, x, y, back);
             }
+            ctx.restore();
             ctx.globalAlpha = 1;
             for (const f of floatersAt(homeSceneTime)) drawNative(f.slot, f.x, f.y);
             const leap = koiJump && tanchoAt(koiJump, koiJump.t);
@@ -2530,35 +2509,29 @@
             drawSplashes();
         }
 
-        // The leaves of one depth, each at its own whole-pixel size (nearest-neighbour,
-        // like the rest of the pixel art), mirrored while it swings back to the left —
-        // which reads as the leaf turning over.
-        function drawLeaves(far) {
+        // The leaves of one depth ("far", "small" or "big"), each at its own whole-pixel
+        // size (nearest-neighbour, like the rest of the pixel art), mirrored while it
+        // swings back to the left — which reads as the leaf turning over.
+        function drawLeaves(depth) {
             for (const l of leaves) {
-                if (l.far !== far || l.wait > 0) continue;
+                if (l.wait > 0 || (l.far ? "far" : l.small ? "small" : "big") !== depth) continue;
                 const r = leafRect(l, 0);
-                if (l.behind) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.rect(0, 0, W, GROUND_Y); // lands on the grass behind the samurai
-                    ctx.clip();
-                }
                 drawNative(l.slot, r.x, r.y, Math.cos(l.phase) < 0, false, l.size);
-                if (l.behind) ctx.restore();
             }
         }
 
         // The whole title-screen scene, in the PSD's order: the backdrop (with the far
-        // leaves inside it, behind the forest), the front leaves, the koi, the title,
-        // the katana, the samurai. actors() draws the START sequence's portals and
-        // gummy last, so the gummy runs in front of the samurai. eyeOpen / alertT: see drawHomeSamurai.
+        // and the small leaves inside it, behind the forest / the ledge), the koi, the
+        // katana, the samurai, the big leaves (in front of him), the title (it overlaps
+        // none of them). actors() draws the START sequence's portals and gummy last, so
+        // the gummy runs in front of the samurai. eyeOpen / alertT: see drawHomeSamurai.
         function drawHomeScene(actors, eyeOpen, alertT) {
             drawHomeBackdrop();
-            drawLeaves(false);
             drawKois();
-            drawHomeTitle();
             drawNative("katana", 0, 0);
             drawHomeSamurai(eyeOpen || HOME_EYE_ALWAYS, eyeOpen ? alertT : -1);
+            drawLeaves("big");
+            drawHomeTitle();
             if (actors) actors();
         }
 
@@ -2675,8 +2648,6 @@
                 ctx.fillText(P.text, P.x, P.y);
                 ctx.globalAlpha = 1;
             }
-
-            drawControlsHint(H - 34, "#ffffff");
         }
 
         // Shared menu renderer: highlights the selected row. shadow (optional) puts a
