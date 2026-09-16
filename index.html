@@ -53,9 +53,10 @@
             filter: brightness(1.12) contrast(1.08) saturate(1.25);
         }
 
-        /* The LOADING screen has its own CRT look, drawn in code: no arcade filter on it */
+        /* The LOADING screen has its own CRT look, drawn in code: no arcade filter on it,
+           only its own brightness (1 = as drawn) */
         #game.boot {
-            filter: none;
+            filter: brightness(1.65);
         }
 
         /* BACKLIGHT — a tiny live copy of the screen, blown up and blurred behind it:
@@ -154,6 +155,8 @@
         // the screen waits for a click (or a key) anywhere: that first press turns the sound on.
         const BOOT_FONT = '50px "VT323"';  // LOADING / ENTER: 28px capitals, as in the reference
         const BOOT_TEXT_Y = 490;           // their baseline (px), centered on the screen
+        const BOOT_DOT_T = 0.35;           // LOADING's dots come one by one, this often (s); ENTER only
+        // replaces it once the third one has been up for as long
         const BOOT_BG = "#060713";         // navy, darker than the reference's #0e0f1d: the grain and the
         // bloom below lift it back to it
         // The frames are Frog_0023_Calque-1 .. Frog_0000_Calque-24: Photoshop numbers the layers
@@ -964,10 +967,13 @@
             if (state === "boot") {
                 if (!mix) ensureAudio(); // the sounds start loading now (they stay silent until a click)
                 // The LOADING screen waits for the images, with a floor and a ceiling on
-                // how long it stays, then holds a beat before ENTER replaces LOADING.
+                // how long it stays, then holds a beat; ENTER replaces LOADING at the end of a
+                // round of dots (all three shown), never in the middle of one.
+                const before = bootTime, round = BOOT_DOT_T * 4;
                 bootTime += dt;
                 if (loadingProgress() >= 1) bootDoneTime += dt;
-                if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) bootReady = true;
+                const loaded = bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T;
+                if (loaded && Math.floor(bootTime / round) > Math.floor(before / round)) bootReady = true;
             } else if (state === "home" && homeReady()) {
                 homeMenuTime += dt; // PRESS START fades in
                 if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
@@ -1626,7 +1632,7 @@
                 ctx.textBaseline = "alphabetic";
                 ctx.textAlign = "left";
                 ctx.fillStyle = "#ffffff";
-                const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / 0.35) % 4);
+                const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / BOOT_DOT_T) % 4);
                 const tx = Math.round(W / 2 - ctx.measureText(bootReady ? "ENTER" : "LOADING ...").width / 2);
                 ctx.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
                 ctx.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
