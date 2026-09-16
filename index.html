@@ -514,6 +514,7 @@
         let notAvailableTime = 0;      // NOT AVAILABLE YET stays up while this is above 0 (s)
         let crossingTime = -1;         // time since the gummy's crossing started (s), -1 = none on screen
         let crossingWait = randIn(PORTAL_GAP); // time before the next crossing (s)
+        let gummyStep = 0;             // which of GUMMY_STEP_STARTS the next footstep plays
 
         /* =====================================================================
            AUDIO — the AudioContext, and the little coded beeps (the sound files are in MIX below)
@@ -567,6 +568,8 @@
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
         const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
         const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
+        const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
+        const MIX_SAMURAI_HM = 0.6;        // the samurai's "hm" as he opens his eye on the gummy
         // --- Feel ---
         const MIX_FADE_IN = 2.5;           // the theme fades in when it starts (s), then never stops
         const MIX_VARY_GAIN = [0.85, 1];   // each splash a little louder or softer (x its volume)...
@@ -576,7 +579,9 @@
         const SOUND_FILES = {
             theme: "Music/theme.mp3",
             tanchoJump: "Music/tancho_koi_jump.wav",
-            tanchoSplash: "Music/tancho_koi_splash.wav"
+            tanchoSplash: "Music/tancho_koi_splash.wav",
+            gummyStep: "Music/gummy_run.wav",
+            samuraiHm: "Music/hm.wav"
         };
         // The theme loops on its own length, not the MP3's: an MP3 carries a little silence
         // before and after the music (the encoder's padding), which some browsers keep when
@@ -585,7 +590,17 @@
         const MP3_PADDING = 1105 / 48000;  // the silence the MP3 encoder puts before it (s)
         // Where the sound actually hits in each file (s): it is lined up so that this
         // moment, not the start of the file, lands on the frame it goes with.
-        const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09 };
+        const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09, gummyStep: 0.008, samuraiHm: 0.004 };
+        // gummy_run.wav is a run of steps, one every ~0.1s: they are played ONE AT A TIME, one
+        // per foot landing in the run cycle (GUMMY_STEP_FRAMES), so they always match the
+        // animation. These are where some of its steps start (s, measured on the file), taken
+        // in turn for variety; each plays GUMMY_STEP_LENGTH. Measure again if the file changes.
+        const GUMMY_STEP_STARTS = [0.022, 0.13, 0.226, 0.332, 0.436, 0.536, 0.636, 0.742,
+            0.842, 0.938, 1.04, 1.146, 1.238, 1.336, 1.436, 1.532];
+        const GUMMY_STEP_LENGTH = 0.09;    // s of the file per step
+        // The run cycle's frames where a foot lands (Gummy_run/gummy_run_n: its ground contact
+        // jumps forward). Measure again if the frames change.
+        const GUMMY_STEP_FRAMES = [1, 5, 10, 14, 18, 21, 25, 28];
         // Opened straight from the disk (file://), the browser refuses to load sound files
         // into the Web Audio mix: the sounds then play through plain <audio> elements
         // instead — same volumes, fade-in and timing, only no stereo panning and no limiter.
@@ -695,8 +710,9 @@
         }
 
         // Plays one scene sound on the SFX bus, panned after x (px on screen), a little
-        // different every time. skip = s of the file to jump over (to land its hit right now).
-        function playSfx(name, volume, x, skip) {
+        // different every time. skip = s of the file to jump over (to land its hit right now),
+        // length = s of the file to play from there (all of it when omitted).
+        function playSfx(name, volume, x, skip, length) {
             const sound = sounds[name];
             if (!mix || !sound || volume <= 0 || !soundRunning()) return;
             const v = volume * randIn(MIX_VARY_GAIN), rate = randIn(MIX_VARY_RATE);
@@ -707,6 +723,7 @@
                 try { el.currentTime = Math.max(0, skip || 0); } catch (e) { }
                 el.volume = Math.min(1, MIX_MASTER * MIX_SFX * v);
                 el.play().catch(() => { });
+                if (length) setTimeout(() => el.pause(), length / rate * 1000);
                 return;
             }
             const t = audioCtx.currentTime;
@@ -724,6 +741,12 @@
             }
             node.connect(mix.sfx);
             src.start(t, Math.max(0, skip || 0));
+            if (length) {
+                const end = t + length / rate;
+                gain.gain.setValueAtTime(v, end - 0.01);
+                gain.gain.linearRampToValueAtTime(0, end); // no click at the cut either
+                src.stop(end);
+            }
         }
 
         // A portal's sound, coded (no file), "kawoosh" style: a blast as it opens (a sub boom
@@ -842,13 +865,15 @@
         //   rightOpen         the right portal opens ~1s before he gets there
         //   .. arrive         he is fully inside it, it closes
         //   end               both portals are closed: the next pause starts
+        //   eyeOpen .. end    the samurai has an eye open: from the gummy's center passing HOME_EYE_FROM
         function crossingTimeline() {
             const gw = gummyWidth();
             const run = PORTAL_OPEN_T + PORTAL_WAIT_T;
             const arrive = run + (PORTAL_RIGHT_X - PORTAL_LEFT_X + gw) / CROSSING_GUMMY_SPEED;
             const leftClose = run + gw / CROSSING_GUMMY_SPEED + PORTAL_HOLD_T;
             const rightOpen = Math.max(0, arrive - 1.0 - PORTAL_OPEN_T);
-            return { run, leftClose, rightOpen, arrive, end: arrive + PORTAL_OPEN_T };
+            const eyeOpen = run + (HOME_EYE_FROM - PORTAL_LEFT_X + gw / 2) / CROSSING_GUMMY_SPEED;
+            return { run, leftClose, rightOpen, arrive, eyeOpen, end: arrive + PORTAL_OPEN_T };
         }
 
         // Waits a random PORTAL_GAP, plays one crossing, and again
@@ -863,6 +888,21 @@
             crossingTime += dt;
             const tl = crossingTimeline();
             if (before < tl.rightOpen && crossingTime >= tl.rightOpen) portalSound(PORTAL_RIGHT_X, tl.arrive - tl.rightOpen);
+            // The samurai's "hm", started early so it is heard as his eye opens
+            const hm = tl.eyeOpen - soundLead("samuraiHm");
+            if (before < hm && crossingTime >= hm) playSfx("samuraiHm", MIX_SAMURAI_HM, HOME_EYE.x);
+            // A footstep on every frame of the run where a foot lands, started early so it is
+            // heard as that frame shows, panned after where the gummy is then
+            const lead = soundLead("gummyStep");
+            const frameAt = time => Math.floor((time - tl.run) * RUN_FPS); // run frames shown so far, 0 = the first
+            for (let f = Math.max(0, frameAt(before + lead) + 1); f <= frameAt(crossingTime + lead); f++) {
+                const at = tl.run + f / RUN_FPS;
+                if (at >= tl.arrive) break;
+                if (!GUMMY_STEP_FRAMES.includes(f % runFrameCount() + 1)) continue;
+                const x = PORTAL_LEFT_X - gummyWidth() / 2 + CROSSING_GUMMY_SPEED * (at - tl.run);
+                const start = GUMMY_STEP_STARTS[gummyStep++ % GUMMY_STEP_STARTS.length];
+                playSfx("gummyStep", MIX_GUMMY_STEP, x, start - SOUND_HIT.gummyStep, GUMMY_STEP_LENGTH);
+            }
             if (crossingTime >= tl.end) {
                 crossingTime = -1;
                 crossingWait = randIn(PORTAL_GAP);
@@ -1610,8 +1650,7 @@
             const x = PORTAL_LEFT_X - gummyWidth() + CROSSING_GUMMY_SPEED * rt; // its left edge
             const running = t >= tl.run && t < tl.arrive;
             // The samurai opens an eye as the gummy comes in front of him, until the right portal has closed
-            const rightClosed = tl.arrive + PORTAL_OPEN_T;
-            const peek = t < rightClosed && (t >= tl.arrive || (running && x + gummyWidth() / 2 >= HOME_EYE_FROM));
+            const peek = t >= tl.eyeOpen && t < tl.end;
 
             drawHomeScene(() => {
                 drawPortal(PORTAL_LEFT_X, portalScale(t, 0, tl.leftClose), PORTAL_LEFT_FLIP, t);
