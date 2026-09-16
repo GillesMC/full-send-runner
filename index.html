@@ -190,6 +190,11 @@
             { slot: "tobi", x: 976, y: 111, soar: { left: 758, right: 1284, ry: 14, period: 36 } },
             { slot: "background", leavesBehind: true } // trees, waterfall, bridge (+ the big rock)
         ];
+        // The temple on its cliff (in background.png) is far away: nothing ever goes behind
+        // it. The kite is drawn again over it wherever it crosses this zone, and no far leaf
+        // ever falls through it. Only the temple, its cliff and the far trees in there (the
+        // near trees start left of it, right of it and under y 355).
+        const HOME_FAR_ZONE = { x: 990, y: 110, w: 190, h: 350 };
         const HOME_FRONT_LAYERS = [
             { slot: "rocks" },
             { slot: "front", y: 530 }                 // the grass ledge (running line) + the pond
@@ -219,16 +224,13 @@
         ];
         // The samurai (samuraï.png, trimmed) at his PSD spot; katana.png is full-canvas.
         const HOME_SAMURAI = { x: 185, y: 346 };
-        // He meditates, barely moving: on every out-breath his upper body sinks one pixel,
-        // and comes back up on the in-breath. Not all at once: it runs up through him like a
-        // slow wave — his shoulders, face and hands first, then the back of his head, then
-        // the top of his hair, HOME_BREATH_LAG apart. Whole rows moved by whole pixels. The
-        // lowest seam sits in his chest, well above his legs: his knees start on row 146 and
+        // He meditates, barely moving: on every out-breath his head, hands and shoulders
+        // sink one pixel, all together — the rows above HOME_BREATH_SPLIT slide down over that
+        // row. The seam sits in his chest, well above his legs: his knees start on row 146 and
         // his elbows rest on them, so nothing from there down ever moves.
         const HOME_BREATH_PX = 1;          // 0 = perfectly still
-        const HOME_BREATH_ROWS = [0, 30, 55, 90]; // the bands that move, top to bottom (rows of samuraï.png): hair tuft | hair | face, shoulders, hands
+        const HOME_BREATH_SPLIT = 90;      // the row of samuraï.png the out-breath covers (chest, under the hands)
         const HOME_BREATH_PERIOD = 4.5;    // one full breath (s)
-        const HOME_BREATH_LAG = 0.25;      // each band follows the one under it this much later (s)
         // His open eye (eye.png = the PSD's "Oeil" layer): he peeks at the gummy while it
         // runs past him in the START sequence. HOME_EYE_ALWAYS = true keeps it open, as in the PSD.
         const HOME_EYE = { x: 333, y: 411 };
@@ -265,22 +267,20 @@
         const HOME_LEAF_MEMORY = 4;        // ...where the last this many came down
         const HOME_LEAF_SMALL = 0.62;      // front leaves smaller than this (x leaf_1) are the small, further back ones
         const HOME_LEAF_HIDDEN_Y = 555;    // front.png's ledge edge is above this all across (532..554): a small leaf whose top is past it is out of sight (px)
-        // The koi (koi_1.png, head down-left in the art) passes through the pond now and then:
-        // it comes up from under the bottom of the screen, swims a zigzag across the DARK
-        // water — up to just under the rock / water edge (HOME_POND_TOP), back down towards
-        // the bottom of the screen, HOME_KOI_BENDS times — and goes back out of the screen
-        // through the bottom. It only ever heads along one of its four diagonals, so it stays
-        // pixel-exact: down-left (as drawn), down-right (mirrored), up-right / up-left
-        // (mirrored across its other diagonal, and that mirrored left/right) — a quarter
-        // turn at each bend, never belly up. A trip is only taken if every spot of it keeps
-        // the whole koi under the edge. It pays no attention to anything else (it swims under
-        // the floating flowers, the leaves and the tancho) and is cut at HOME_POND_TOP.
+        // The koi (koi_1.png, drawn level: head to the side) passes through the pond now and
+        // then, always level. It comes up from under the bottom of the screen while already
+        // swimming forward, swims straight across the DARK water, then goes back down out of
+        // the screen the same way, still swimming forward. Its swim line is just under the
+        // rock / water edge (HOME_POND_TOP) all along it, and a trip is only taken if the
+        // whole koi stays under that edge and in the dark water on the way up and down too.
+        // Mirrored when it swims the other way. It pays no attention to anything else (it
+        // swims under the floating flowers, the leaves and the tancho) and is cut at HOME_POND_TOP.
         const HOME_KOI = "koi_1";
-        const HOME_KOI_HALF = [28, 25];    // half of koi_1.png's 56x50 (px): half width, half height as drawn
-        const HOME_KOI_ZONE = [30, 1010];  // its center always stays in here: the dark water, left of the pale pool under the waterfall (px)
+        const HOME_KOI_FACES = 1;          // which way its head points in koi_1.png: 1 = right, -1 = left
+        const HOME_KOI_ZONE = [0, 1040];   // its left and right edges always stay in here: the dark water, left of the pale pool under the waterfall (px)
+        const HOME_KOI_SWIM = [120, 400];  // how far it swims level, on its swim line (px)
+        const HOME_KOI_SLANT = [0.4, 2.5]; // coming up / going down: px it swims forward per px up or down (drawn per trip: steep enough to come up between the rocks)
         const HOME_KOI_SPEED = 8;          // px/s
-        const HOME_KOI_BENDS = [1, 3];     // how many times it comes up to the edge on one trip
-        const HOME_KOI_DIP = [-8, 8];      // between two, its center goes this far below the bottom of the screen (px): still half in sight
         const HOME_KOI_GAP = [4, 10];      // pause between two trips (s)
         // The tancho koi is the only one that leaps: out of the pond in an arc, in front of
         // the ledge. Two poses: head up on the way up, then level (head forward) from just
@@ -362,6 +362,7 @@
         const PORTAL_LEFT_FLIP = false;    // as drawn: leans "\" (top to the left)
         const PORTAL_RIGHT_FLIP = true;    // mirrored: leans "/" — the pair opens outward
         const PORTAL_OPEN_T = 0.3;         // a portal opens / closes in this long (s)
+        const PORTAL_WAIT_T = 1.5;         // the left portal swirls open this long before the gummy comes out (s)
         const PORTAL_HOLD_T = 0.25;        // the left portal stays open this long once the gummy is out (s)
         const INTRO_GUMMY_SPEED = 460;     // run speed across the screen (px/s)
         const INTRO_GUMMY_HOP_PX = 3;      // with a single run frame: a little hop instead of a leg cycle (px)
@@ -845,14 +846,14 @@
 
         // Key moments of the START sequence (s since START), from the constants above
         // and the gummy's own width:
-        //   0 .. run          the left portal opens
+        //   0 .. run          the left portal opens, and swirls PORTAL_WAIT_T before he comes out
         //   .. leftClose      the gummy is fully out of it, it closes behind him
         //   rightOpen         the right portal opens ~1s before he gets there
         //   .. arrive         he is fully inside it, it closes
         //   fade .. end       fade to black, the run starts
         function introTimeline() {
             const gw = gummyWidth();
-            const run = PORTAL_OPEN_T;
+            const run = PORTAL_OPEN_T + PORTAL_WAIT_T;
             const arrive = run + (PORTAL_RIGHT_X - PORTAL_LEFT_X + gw) / INTRO_GUMMY_SPEED;
             const leftClose = run + gw / INTRO_GUMMY_SPEED + PORTAL_HOLD_T;
             const rightOpen = Math.max(0, arrive - 1.0 - PORTAL_OPEN_T);
@@ -2009,7 +2010,7 @@
         let homeSceneTime = 0;     // the scene's own clock (s)
         let leaves = [];           // {cx, y, w, h, fall, sway, speed, phase, far, slot, size, wait} — cx = center of the sway
         let leafSpawnXs = [];      // where the last leaves came down (center x), newest last
-        let koi = { trip: null, leg: 0, x: 0, y: 0, wait: 2 }; // see planKoiTrip; wait = time before the next trip (s)
+        let koi = { trip: null, leg: 0, x: 0, y: 0, wait: 2 }; // see planKoiTrip: x, y = its top-left corner; wait = time before the next trip (s)
         let tanchoWater = [];      // the droplets riding up with the tancho, then thrown off (see HOME_KOI_WATER_*)
         let koiJump = null;        // the tancho's leap in progress {t, x0, dir}, or null
         let koiJumpWait = 2.5;     // time before the next leap (s) — the first one comes early
@@ -2152,6 +2153,7 @@
             for (let k = 0; ; k++) {
                 const r = leafRect(l, k * HOME_LOOK_STEP);
                 if (r.y >= leafEnd(l)) return true;
+                if (l.far && rectsNear(r, HOME_FAR_ZONE, 0)) return false; // never behind the temple
                 for (const o of sceneAt(k)) if (o.who !== l && rectsNear(r, o.r, HOME_LEAF_GAP)) return false;
             }
         }
@@ -2279,6 +2281,14 @@
                 drawNative(L.slot, x, y, flipX);
                 ctx.globalCompositeOperation = "source-over";
             }
+            // the kite over the temple, where it crosses it (see HOME_FAR_ZONE)
+            const kite = tobiAt(homeSceneTime), Z = HOME_FAR_ZONE;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(Z.x, Z.y, Z.w, Z.h);
+            ctx.clip();
+            drawNative(HOME_TOBI.slot, kite.x, kite.y, kite.flip);
+            ctx.restore();
             drawLeaves("small"); // further back: behind the rocks and the ledge
             for (const L of HOME_FRONT_LAYERS) drawNative(L.slot, L.x || 0, L.y || 0);
             drawHomeWater();
@@ -2355,28 +2365,18 @@
             ctx.drawImage(waterCanvas, 0, 0);
         }
 
-        // The samurai at his PSD spot, meditating. Each band of HOME_BREATH_ROWS is drawn
-        // HOME_BREATH_PX lower during its out-breath, the lowest band first: whole rows moved
-        // by whole pixels, nothing is ever resampled. A band that has sunk covers the top row
-        // of the band under it; a band still up while the one under it has sunk stretches
-        // its last row over the gap. eyeOpen draws eye.png on him — it follows the breath of
-        // the band it sits in, it is part of his face.
+        // The samurai at his PSD spot, meditating. On the out-breath the rows above
+        // HOME_BREATH_SPLIT are drawn HOME_BREATH_PX lower, over the top row below them:
+        // whole rows moved by whole pixels, nothing is ever resampled. eyeOpen draws
+        // eye.png on him — it follows the breath, it is part of his head.
         function drawHomeSamurai(eyeOpen) {
             const img = assets["samuraï"];
             if (!img) return;
-            const { x, y } = HOME_SAMURAI, rows = HOME_BREATH_ROWS, n = rows.length - 1;
-            const sunk = i => Math.sin((homeSceneTime - (n - 1 - i) * HOME_BREATH_LAG) * Math.PI * 2 / HOME_BREATH_PERIOD) > 0
-                ? HOME_BREATH_PX : 0; // band i (0 = top)
-            ctx.drawImage(img, 0, rows[n], img.width, img.height - rows[n], x, y + rows[n], img.width, img.height - rows[n]);
-            for (let i = n - 1; i >= 0; i--) { // bottom up: each band is drawn over the seam under it
-                const off = sunk(i), gap = Math.max(0, (i < n - 1 ? sunk(i + 1) : 0) - off);
-                const hgt = rows[i + 1] - rows[i] + gap;
-                ctx.drawImage(img, 0, rows[i], img.width, hgt, x, y + rows[i] + off, img.width, hgt);
-            }
-            if (eyeOpen) {
-                const band = rows.findIndex((r, i) => i < n && HOME_EYE.y - y < rows[i + 1]);
-                drawNative("eye", HOME_EYE.x, HOME_EYE.y + (band >= 0 ? sunk(band) : 0));
-            }
+            const { x, y } = HOME_SAMURAI, s = HOME_BREATH_SPLIT;
+            const out = Math.sin(homeSceneTime * Math.PI * 2 / HOME_BREATH_PERIOD) > 0 ? HOME_BREATH_PX : 0;
+            ctx.drawImage(img, 0, s, img.width, img.height - s, x, y + s, img.width, img.height - s);
+            ctx.drawImage(img, 0, 0, img.width, s, x, y + out, img.width, s);
+            if (eyeOpen) drawNative("eye", HOME_EYE.x, HOME_EYE.y + out);
         }
 
         // A splash where the tancho breaks the water at x: its droplets are drawn once, at
@@ -2504,49 +2504,31 @@
             ctx.globalAlpha = 1;
         }
 
-        // A trip for the koi, or null if none fits from there: {dir, points}
-        // — its center at each bend, from under the bottom of the screen and back there; the
-        // pose of the leg that ends on each point (up / down) and dir (1 = heading right).
-        // The lowest rock / water edge over its width at x:
-        function koiEdge(x) {
+        // The lowest rock / water edge over columns x0..x1
+        function koiEdge(x0, x1) {
             let y = 0;
-            for (let c = Math.max(0, Math.round(x - HOME_KOI_HALF[0])); c <= Math.min(W - 1, Math.round(x + HOME_KOI_HALF[0])); c++)
-                y = Math.max(y, pondTopCol[c]);
+            for (let c = Math.max(0, Math.floor(x0)); c <= Math.min(W - 1, Math.ceil(x1)); c++) y = Math.max(y, pondTopCol[c]);
             return y;
         }
-        // From a spot drawn at random, the most bends that fit (up to a number drawn at random)
+        // A trip for the koi drawn at random, or null if it does not fit: {dir, points} — its
+        // top-left corner under the bottom of the screen, where it is level on its swim line,
+        // where it leaves that line, and under the bottom of the screen again. dir 1 = heading right.
         function planKoiTrip() {
-            const dir = Math.random() < 0.5 ? 1 : -1, x0 = randIn(HOME_KOI_ZONE);
-            for (let bends = Math.round(randIn(HOME_KOI_BENDS)); bends >= 1; bends--) {
-                const trip = koiTrip(dir, x0, bends);
-                if (trip) return trip;
-            }
-            return null;
-        }
-        function koiTrip(dir, x0, bends) {
-            const [hw, hh] = HOME_KOI_HALF;                     // heading down: hw x hh; heading up it is turned: hh x hw
-            const UP = [0.67, -0.74], DOWN = [0.74, 0.67];      // its head, heading right (koi_1's diagonal)
-            let x = x0, y = H + hw + 2;                         // wholly under the bottom of the screen
-            const points = [{ x, y }];
-            const go = (pose, toY) => {
-                const v = pose === "up" ? UP : DOWN;
-                x += dir * v[0] * (toY - y) / v[1];
-                y = toY;
-                points.push({ x, y, pose });
-            };
-            for (let b = 0; b < bends; b++) {
-                let top = y;                                   // up to just under the edge where it gets there (it bobs 1px)
-                for (let i = 0; i < 3; i++) top = koiEdge(x + dir * UP[0] * (top - y) / UP[1]) + hw + 2;
-                if (top > H - 4) return null;                  // not even half of it in sight there
-                go("up", top);
-                go("down", b < bends - 1 ? H + randIn(HOME_KOI_DIP) : H + hh + 2);
-            }
-            // the whole trip in the dark water, and the whole koi under the edge all along
-            for (let i = 1; i < points.length; i++) {
-                const a = points[i - 1], b = points[i], half = b.pose === "up" ? hw : hh;
+            const img = assets[HOME_KOI];
+            if (!img) return null;
+            const w = img.width, h = img.height, Z = HOME_KOI_ZONE;
+            const dir = Math.random() < 0.5 ? 1 : -1, len = randIn(HOME_KOI_SWIM);
+            if (Z[1] - w - len < Z[0]) return null;
+            const left = rand(Z[0], Z[1] - w - len);                 // the left end of its swim
+            const from = dir > 0 ? left : left + len, to = dir > 0 ? left + len : left;
+            const y = koiEdge(left, left + len + w) + 2;             // its swim line: under the edge all along (it bobs 1px)
+            if (y > H - h / 2) return null;                          // not even half of it in sight
+            const out = H + 2, run = (out - y) * randIn(HOME_KOI_SLANT); // how far it swims on while coming up / going down
+            const points = [{ x: from - dir * run, y: out }, { x: from, y }, { x: to, y }, { x: to + dir * run, y: out }];
+            for (const [a, b] of [[points[0], points[1]], [points[2], points[3]]]) {
                 for (let k = 0; k <= 16; k++) {
-                    const cx = a.x + (b.x - a.x) * k / 16, cy = a.y + (b.y - a.y) * k / 16;
-                    if (cx < HOME_KOI_ZONE[0] || cx > HOME_KOI_ZONE[1] || cy - half - 1 < koiEdge(cx)) return null;
+                    const x = a.x + (b.x - a.x) * k / 16, top = a.y + (b.y - a.y) * k / 16;
+                    if (x < Z[0] || x + w > Z[1] || top - 1 < koiEdge(x, x + w)) return null;
                 }
             }
             return { dir, points };
@@ -2567,13 +2549,10 @@
         // riding up with it and its splashes
         function drawKois() {
             if (koi.trip && assets[HOME_KOI]) {
-                const up = koi.trip.points[koi.leg].pose === "up", dir = koi.trip.dir;
                 ctx.save();
                 clipToPond();
-                ctx.translate(Math.round(koi.x), Math.round(koi.y) + Math.round(Math.sin(homeSceneTime * 1.3))); // ±1px bob
-                if (up) ctx.transform(0, 1, dir, 0, 0, 0); // mirrored across its other diagonal: up-right (and mirrored: up-left)
-                else ctx.scale(-dir, 1);                   // as drawn: down-left (mirrored: down-right)
-                ctx.drawImage(assets[HOME_KOI], -HOME_KOI_HALF[0], -HOME_KOI_HALF[1]);
+                const bob = Math.round(Math.sin(homeSceneTime * 1.3)); // ±1px
+                drawNative(HOME_KOI, koi.x, koi.y + bob, koi.trip.dir !== HOME_KOI_FACES); // swimming the other way: mirrored
                 ctx.restore();
             }
             for (const f of floatersAt(homeSceneTime)) drawNative(f.slot, f.x, f.y);
