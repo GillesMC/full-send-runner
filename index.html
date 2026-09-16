@@ -178,8 +178,9 @@
         const BOOT_TEXT_Y = 490;           // baseline on screen (px), centered on the screen
         const BOOT_TEXT_COLOR = "#eef2f8";
         const BOOT_TEXT_ALPHA = 1;
+        const BOOT_TEXT_SOFTNESS = 0.4;    // the text's own softness (px): the screen's (BOOT_SOFTNESS) would grey its thin strokes
         const BOOT_TEXT_GLOW_BLUR = 3;     // its soft glow (px)...
-        const BOOT_TEXT_GLOW_ALPHA = 0.3;  // ...this strong
+        const BOOT_TEXT_GLOW_ALPHA = 0.7;  // ...this strong
         const BOOT_DOT_T = 0.35;           // LOADING's dots come one by one, this often (s); ENTER only
         // replaces it once the third one has been up for as long
         // The screen itself
@@ -1628,8 +1629,8 @@
         let grainPick = { pattern: 0, x: 0, y: 0, frames: 0 }; // the grain pattern and offset on screen now
 
         // The LOADING screen. The picture is put together off screen — background, the frog's
-        // glow then the frog, LOADING (or ENTER) with its glow, a touch of bloom — then laid on
-        // the screen very slightly blurred, with the scanlines and the grain on top of it all.
+        // glow then the frog — then laid on the screen slightly blurred with a touch of bloom;
+        // LOADING (or ENTER) and its glow come next, then the scanlines and the grain on top of it all.
         // ctx.filter (blurs, contrast...) is skipped by browsers that don't have it.
         function drawBoot() {
             if (!bootLayers) bootLayers = buildBootLayers();
@@ -1651,32 +1652,6 @@
                 pic.restore();
             }
 
-            if (bootFontReady) {
-                // LOADING with its dots appearing one by one (the word stays put), then ENTER:
-                // drawn small on its own canvas, then enlarged pixel for pixel, centered
-                const tc = L.text.getContext("2d");
-                tc.clearRect(0, 0, L.text.width, L.text.height);
-                tc.font = BOOT_FONT;
-                tc.textBaseline = "alphabetic";
-                tc.fillStyle = BOOT_TEXT_COLOR;
-                const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / BOOT_DOT_T) % 4);
-                const tw = tc.measureText(bootReady ? "ENTER" : "LOADING ...").width;
-                const base = 40; // the text's baseline on its canvas
-                tc.fillText(text, Math.round(L.text.width / 2 - tw / 2), base);
-                const x = W / 2 - L.text.width * BOOT_TEXT_SCALE / 2, y = BOOT_TEXT_Y - base * BOOT_TEXT_SCALE;
-                const w = L.text.width * BOOT_TEXT_SCALE, h = L.text.height * BOOT_TEXT_SCALE;
-                pic.save();
-                pic.globalCompositeOperation = "screen";
-                pic.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
-                pic.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
-                pic.drawImage(L.text, x, y, w, h);
-                pic.restore();
-                pic.save();
-                pic.globalAlpha = BOOT_TEXT_ALPHA;
-                pic.drawImage(L.text, x, y, w, h);
-                pic.restore();
-            }
-
             // On screen: the picture very slightly softened, then a touch of bloom
             ctx.fillStyle = BOOT_BG;
             ctx.fillRect(0, 0, W, H); // under the soft edges of the blur
@@ -1688,6 +1663,34 @@
             ctx.globalAlpha = BOOT_BLOOM_ALPHA;
             ctx.drawImage(L.picture, 0, 0);
             ctx.restore();
+
+            if (bootFontReady) {
+                // LOADING with its dots appearing one by one (the word stays put), then ENTER:
+                // drawn small on its own canvas, then enlarged pixel for pixel, centered. It comes after
+                // the screen's softness, with a lighter one of its own: thin strokes stay white
+                const tc = L.text.getContext("2d");
+                tc.clearRect(0, 0, L.text.width, L.text.height);
+                tc.font = BOOT_FONT;
+                tc.textBaseline = "alphabetic";
+                tc.fillStyle = BOOT_TEXT_COLOR;
+                const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / BOOT_DOT_T) % 4);
+                const tw = tc.measureText(bootReady ? "ENTER" : "LOADING ...").width;
+                const base = 40; // the text's baseline on its canvas
+                tc.fillText(text, Math.round(L.text.width / 2 - tw / 2), base);
+                const x = W / 2 - L.text.width * BOOT_TEXT_SCALE / 2, y = BOOT_TEXT_Y - base * BOOT_TEXT_SCALE;
+                const w = L.text.width * BOOT_TEXT_SCALE, h = L.text.height * BOOT_TEXT_SCALE;
+                ctx.save();
+                ctx.globalCompositeOperation = "screen";
+                ctx.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
+                ctx.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
+                ctx.drawImage(L.text, x, y, w, h);
+                ctx.restore();
+                ctx.save();
+                ctx.filter = "blur(" + BOOT_TEXT_SOFTNESS + "px)";
+                ctx.globalAlpha = BOOT_TEXT_ALPHA;
+                ctx.drawImage(L.text, x, y, w, h);
+                ctx.restore();
+            }
 
             ctx.fillStyle = L.scanlines;
             ctx.fillRect(0, 0, W, H);
