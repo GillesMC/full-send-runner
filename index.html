@@ -344,12 +344,12 @@
 
         // --- Menu ---
         // PRESS START does not start anything yet: a press swaps it for this message,
-        // same font and color, centered where PRESS START is, for NOT_AVAILABLE_T
-        const NOT_AVAILABLE_TEXT = "NOT AVAILABLE YET";
-        const NOT_AVAILABLE_T = 2;         // how long the message stays up (s)
-
-        // --- Audio ---
-        const SOUND_VOLUME = 0.07;         // master volume of the little beeps (0 = mute)
+        // same font and color, each line centered where PRESS START is, for PRESS_MESSAGE_T.
+        // The last line sits on PRESS START's baseline, the ones before it above it: the block
+        // stays between the title (its lowest bob: y 343) and the tancho's leap (top: y 440).
+        const PRESS_MESSAGE_LINES = ["Congrats,", "you’ve finished the game"];
+        const PRESS_MESSAGE_LINE_H = 40;   // baseline to baseline (px): the 26px letters + a 14px gap
+        const PRESS_MESSAGE_T = 2;         // how long the message stays up (s)
 
         /* =====================================================================
            SETUP
@@ -511,13 +511,13 @@
         let bootTime = 0;              // time spent on the LOADING screen (s)
         let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
         let homeMenuTime = 0;          // time since PRESS START appeared (drives its fade-in)
-        let notAvailableTime = 0;      // NOT AVAILABLE YET stays up while this is above 0 (s)
+        let pressMessageTime = 0;      // PRESS_MESSAGE_LINES stay up while this is above 0 (s)
         let crossingTime = -1;         // time since the gummy's crossing started (s), -1 = none on screen
         let crossingWait = randIn(PORTAL_GAP); // time before the next crossing (s)
         let gummyStep = 0;             // which of GUMMY_STEP_STARTS the next footstep plays
 
         /* =====================================================================
-           AUDIO — the AudioContext, and the little coded beeps (the sound files are in MIX below)
+           AUDIO — the AudioContext (the sounds themselves are in MIX below)
            ===================================================================== */
 
         let audioCtx = null;
@@ -532,24 +532,6 @@
         // Where the coded sounds go: the SFX bus of the mix (see MIX), or straight out
         // in <audio> mode, which has no buses
         function sfxOutput() { return mix && mix.sfx ? mix.sfx : audioCtx.destination; }
-
-        // Plays a short beep. freqFrom/freqTo lets us do little pitch slides. Silent while
-        // sound is still off: a beep queued then would all go off at once on the first click.
-        function beep(freqFrom, freqTo, dur, type) {
-            if (!audioCtx || audioCtx.state !== "running" || SOUND_VOLUME <= 0) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            const t = audioCtx.currentTime;
-            osc.type = type || "square";
-            osc.frequency.setValueAtTime(freqFrom, t);
-            osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t + dur);
-            gain.gain.setValueAtTime(SOUND_VOLUME, t);
-            gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-            osc.connect(gain).connect(sfxOutput());
-            osc.start(t);
-            osc.stop(t + dur);
-        }
-
 
         /* =====================================================================
            MIX — the music and sounds (assets/Music/)
@@ -569,6 +551,7 @@
         const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
         const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
+        const MIX_PRESS_START = 1.0;       // a press on PRESS START
         const MIX_SAMURAI_HM = 1.0;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
         // --- Feel ---
         const MIX_FADE_IN = 2.5;           // the theme fades in when it starts (s), then never stops
@@ -581,7 +564,8 @@
             tanchoJump: "Music/tancho_koi_jump.wav",
             tanchoSplash: "Music/tancho_koi_splash.wav",
             gummyStep: "Music/gummy_run.wav",
-            samuraiHm: "Music/hm.wav"
+            samuraiHm: "Music/hm.wav",
+            pressStart: "Music/press_start.mp3"
         };
         // The theme loops on its own length, not the MP3's: an MP3 carries a little silence
         // before and after the music (the encoder's padding), which some browsers keep when
@@ -918,14 +902,14 @@
         }
 
         // Any press (key, click, tap — anywhere) on the title screen: PRESS START is
-        // not wired to a game yet, so it shows NOT AVAILABLE YET instead
+        // not wired to a game yet, so it plays its sound and shows PRESS_MESSAGE_LINES instead
         function pressButton() {
             if (state !== "home") return; // the LOADING screen can't be skipped
             // The first press ever, if sound was still off, only turns it on (see unlockSound)
             if (pressUnlocksSound) { pressUnlocksSound = false; return; }
             if (!homeReady()) return; // PRESS START is not up yet
-            beep(600, 900, 0.08, "square"); // confirm blip
-            notAvailableTime = NOT_AVAILABLE_T;
+            playSfx("pressStart", MIX_PRESS_START, W / 2);
+            pressMessageTime = PRESS_MESSAGE_T;
         }
 
         window.addEventListener("keydown", (e) => {
@@ -957,7 +941,7 @@
             } else if (state === "home" && homeReady()) {
                 homeMenuTime += dt; // PRESS START fades in
                 if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
-                if (notAvailableTime > 0) notAvailableTime -= dt;
+                if (pressMessageTime > 0) pressMessageTime -= dt;
                 updateCrossing(dt);
             }
         }
@@ -1581,7 +1565,7 @@
 
         // Title screen, with the gummy's crossing when one is on. PRESS START only shows
         // up once everything else is in place (see homeReady), and fades in over
-        // HOME_MENU_FADE_T; after a press it reads NOT AVAILABLE YET for a while,
+        // HOME_MENU_FADE_T; after a press it reads PRESS_MESSAGE_LINES for a while,
         // centered on the same spot.
         function drawHome() {
             if (crossingTime >= 0) drawCrossing();
@@ -1594,9 +1578,12 @@
                 ctx.textAlign = "left";
                 ctx.textBaseline = "alphabetic";
                 ctx.fillStyle = P.color;
-                if (notAvailableTime > 0) {
+                if (pressMessageTime > 0) {
                     const cx = P.x + ctx.measureText(P.text).width / 2;
-                    ctx.fillText(NOT_AVAILABLE_TEXT, Math.round(cx - ctx.measureText(NOT_AVAILABLE_TEXT).width / 2), P.y);
+                    PRESS_MESSAGE_LINES.forEach((line, i) => {
+                        const y = P.y - (PRESS_MESSAGE_LINES.length - 1 - i) * PRESS_MESSAGE_LINE_H;
+                        ctx.fillText(line, Math.round(cx - ctx.measureText(line).width / 2), y);
+                    });
                 } else {
                     ctx.fillText(P.text, P.x, P.y);
                 }
