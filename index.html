@@ -91,29 +91,11 @@
             display: none;
         }
 
-        #gate .gate-icon {
-            font-size: 44px;
-            line-height: 1;
-        }
-
-        #gate .gate-title {
-            font-size: 22px;
-            font-weight: 700;
-            letter-spacing: 3px;
-        }
-
         #gate .gate-line {
             font-size: 15px;
             letter-spacing: 1px;
             line-height: 1.6;
             max-width: 30ch;
-        }
-
-        #gate .gate-hint {
-            font-size: 11px;
-            letter-spacing: 1px;
-            opacity: 0.7;
-            text-transform: none;
         }
 
         /* Blinking cursor, because this is an arcade console after all */
@@ -144,9 +126,6 @@
         <canvas id="game" width="1280" height="720"></canvas>
     </div>
 
-    <!-- Supabase client library (online leaderboard). If this fails to load,
-     the game detects it and runs fully offline as before. -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         "use strict";
 
@@ -232,7 +211,7 @@
         const HOME_BREATH_SPLIT = 90;      // the row of samurai.png the out-breath covers (chest, under the hands)
         const HOME_BREATH_PERIOD = 1.5;    // one full breath (s): in-breath, then out-breath, half each
         const HOME_BREATH_PAUSE = 2;       // then he stays breathed out this long before the next breath (s)
-        // His open eye (eye.png = the PSD's "Oeil" layer): in the START sequence he opens it as
+        // His open eye (eye.png = the PSD's "Oeil" layer): during the crossing he opens it as
         // the gummy comes in front of him and keeps it open until the right portal has closed
         // behind it. HOME_EYE_ALWAYS = true keeps it open, as in the PSD.
         const HOME_EYE = { x: 333, y: 411 };
@@ -335,10 +314,11 @@
         const HOME_PRESS_START = { text: "PRESS START", x: 494, y: 429, font: '26px "Press Start 2P"', color: "#ffffff" };
         const MENU_SHADOW = "rgba(15,25,15,0.8)"; // drop shadow under the white menu text on the forest
 
-        // --- START sequence: the gummy crosses the screen, portal to portal ---
+        // --- The crossing: the gummy runs across the title screen, portal to portal ---
         // A portal opens on the left, the red gummy runs out of it, past the
-        // meditating samurai, into a second portal on the right; both close, and the
-        // run starts. It plays every time START is pressed and can't be skipped.
+        // meditating samurai, into a second portal on the right; both close. It plays
+        // on its own, again and again, after a random pause each time (PORTAL_GAP).
+        const PORTAL_GAP = [5, 10];        // pause before each crossing, picked at random in this range (s)
         const PORTAL_LEFT_X = 115;         // portal centers (px) — the left one where the PSD has it
         const PORTAL_RIGHT_X = 1195;
         const PORTAL_CENTER_Y = 471;       // vertical center of both portals (px, from the PSD)
@@ -351,152 +331,24 @@
         const PORTAL_OPEN_T = 0.3;         // a portal opens / closes in this long (s)
         const PORTAL_WAIT_T = 0.5;         // the left portal swirls open this long before the gummy comes out (s)
         const PORTAL_HOLD_T = 0.25;        // the left portal stays open this long once the gummy is out (s)
-        const INTRO_GUMMY_SPEED = 460;     // run speed across the screen (px/s)
-        const INTRO_FADE_T = 0.4;          // fade to black before the run (s)
+        const CROSSING_GUMMY_SPEED = 460;  // run speed across the screen (px/s)
 
-        // --- Death sequence ---
-        // Two beats: the runner is thrown into his `hurt` pose and freezes there while a
-        // koala sprints in from the LEFT to catch him; the moment he reaches him both
-        // vanish and the gameover_player_1..7 animation plays out.
-        const DEATH_SEQUENCE_DURATION = 3.4; // whole sequence, both beats (s)
-        const DEATH_CATCH_FRAC = 0.38;       // when the koala reaches the player (fraction of the sequence)
-        const DEATH_KOALA_FROM = -0.14;      // koala's start x (fraction of screen width, just off-screen
-        // LEFT, so he is on screen almost immediately)
-        const GAMEOVER_FRAME_COUNT = 7;      // gameover_player_1..7, played once in order
-        const GAMEOVER_BEAT_FRAME_T = 0.26;  // seconds per gameover frame (7 frames ~ 1.8s)
-
-        /* ---------------------------------------------------------------------
-           GAMEPLAY CONSTANTS
-           In screen pixels (1280x720). Only change these if you actually want to
-           change the GAME.
-           --------------------------------------------------------------------- */
-
-        // --- Run speed & scoring ---
-        const BASE_SPEED = 403;            // world scroll speed at the very start of a run (px/s)
-        const SPEED_RAMP = 4.7;            // extra speed gained per second (px/s per s)
-        const MAX_SPEED = 568;             // speed cap (px/s)
-        const SCORE_PER_PIXEL = 0.038;     // score gained per pixel traveled (scaled down so the
-        // score still climbs at the same rate per SECOND)
-
-        // --- Player physics ---
-        const GRAVITY = 4086;              // downward acceleration (px/s²)
-        const JUMP_VELOCITY = 1345;        // initial upward speed of a jump (px/s) — ~221px high
-        const DOUBLE_JUMP_VELOCITY = 1275; // upward speed of the second (air) jump (px/s) — ~199px more
-        const JUMP_CUT_MULT = 0.45;        // releasing early multiplies upward speed by this (tap = short hop)
-        const MAX_FALL_SPEED = 1954;       // max fall speed in normal free fall (px/s)
-        const COYOTE_TIME = 0.08;          // grace period to still jump right after leaving the ground (s)
-        const JUMP_BUFFER_TIME = 0.10;     // pressing jump this early before landing still triggers it (s)
-
-        // --- Player hitbox (NEVER changes during a run, only visuals change) ---
-        const PLAYER_X = 130;              // fixed horizontal position of the player (~12% from the left)
-        const PLAYER_W = 48;               // hitbox width (px) — the gummy's body; the swinging arms
-        // and legs of the run frames stick out of it
-        const PLAYER_H = 88;               // hitbox height (px) — the gummy_run_* frame height: its bottom
-        // row (the feet) sits on GROUND_Y like the samurai's
-        const HITBOX_PAD = 7;              // collision forgiveness: hitbox is shrunk by this on each side (px)
-
-        // --- Player sprites: the red gummy (gummy_run_1..N, gummy_jump, ...) ---
-        // Pixel art, drawn at its NATIVE size, feet on the bottom of the hitbox.
+        // --- The gummy (Gummy_run/gummy_run_1..N), crossing the title screen ---
         const RUN_FPS = 24;                // run cycle speed (frames per second): 30 frames = 1.25s
         const RUN_FRAME_COUNT = 30;        // Gummy_run/gummy_run_1..30 — they share one canvas, feet on its bottom
         // edge and head at the same x, so they play back without any jitter
-        const ANIM_FPS = 10;               // speed of the hold (jetpack) animation loop (frames per second)
-        const HOLD_FRAME_COUNT = 3;        // number of gummy_hold_* frames
-        const DEBUG_HITBOX = false;        // true = draw the real collision box over the sprite (alignment check)
-        // gummy_hurt is the one exception: the character is thrown through the air, so
-        // it is anchored on the hitbox CENTER instead of on the feet.
-
-        // --- World layout ---
+        const PLAYER_W = 48;               // placeholder gummy (while its frames are missing): width (px)
+        const PLAYER_H = 88;               // ...and height (px)
         const GROUND_Y = 560;              // the running line (px from the top of the screen) — the
-        // samurai, the katana and the gummy all stand on it, on the title screen too
+        // samurai, the katana and the gummy all stand on it
 
-        // --- Obstacle generation (time-based spacing => always playable at any speed) ---
-        const SPAWN_GAP_MIN = 0.95;        // minimum time between two hazards (s)
-        const SPAWN_GAP_MAX = 1.70;        // maximum time between two hazards (s)
-        const KOALA_ANIM_FPS = 7;          // koala_running_1..2 walk loop (frames per second)
-        const PIGEON_ANIM_FPS = 2.5;       // pigeon_1..2 wing beat — deliberately slow and lazy
-        // Size presets per obstacle type. Only the HEIGHT is authoritative: the width
-        // is derived from the artwork's aspect ratio, so nothing is ever stretched.
-        const KOALA_SIZES = [
-            { w: 84, h: 97 },                // the koala cop, small
-            { w: 97, h: 128 }                // the koala cop, tall
-        ];
-        const PIGEON_SIZES = [
-            { w: 105, h: 110 }               // a small bird — clearly smaller than the runner
-        ];
+        // --- Menu ---
+        // PRESS START does not start anything yet: a press swaps it for this message,
+        // same font and color, centered where PRESS START is, for NOT_AVAILABLE_T
+        const NOT_AVAILABLE_TEXT = "NOT AVAILABLE YET";
+        const NOT_AVAILABLE_T = 2;         // how long the message stays up (s)
 
-        // --- Pigeon flight ---
-        // The bird never sits still: it either bobs up and down or glides down on a
-        // diagonal. BOTH paths are bounded so its lowest point is exactly the overhead
-        // clearance line, which keeps it possible to run underneath at all times.
-        const PIGEON_WAVE_AMPLITUDE = 38;  // how far above the clearance line it rises (px)
-        const PIGEON_WAVE_SPEED = 1.9;     // bobbing speed (radians/s)
-        const PIGEON_DIAGONAL_CHANCE = 0.35; // share of pigeons gliding down diagonally instead of bobbing
-        const PIGEON_DIAGONAL_RISE = 95;   // how high a diagonal one starts above the clearance line (px)
-        // The death scene reuses the run's own sizes
-        const DEATH_KOALA_H = KOALA_SIZES[1].h;  // the koala catching you = the tall ground obstacle
-        const DEATH_KOALA_FPS = 8;               // its walk loop speed
-        const GAMEOVER_FRAME_H = 148;            // gameover_player_* are drawn at this height (px)
-
-        const OVERHEAD_CLEARANCE = 45;     // free space between the player's head (running) and an overhead block (px)
-        const GAP_WIDTH_MIN = 130;         // hole in the ground: min width (px) — must stay jumpable
-        const GAP_WIDTH_MAX = 201;         // hole in the ground: max width (px)
-
-        // --- Obstacle hitboxes ---
-        // A FIXED box on the creature's body, as fractions of the sprite frame {x0, y0,
-        // x1, y1}, measured on the overlap of the animation frames: both frames share a
-        // canvas, so the box never moves with the animation.
-        // Keys are the obstacle's own `type` ("ground" / "overhead").
-        const OBSTACLE_BODY_BOX = {
-            ground: { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 }, // koala: fills its frame, barely trimmed
-            // Pigeon: the WHOLE bird, wings included. Its two frames sweep their wings
-            // across opposite corners (frame 1 reaches the top-right, frame 2 the
-            // bottom-left), so the union of the artwork IS the full frame — which makes
-            // the hitbox and the drawn sprite exactly the same rect here.
-            overhead: { x0: 0.00, y0: 0.00, x1: 1.00, y1: 1.00 }
-        };
-
-        // --- Collectibles (3 kinds: points, jetpack, heart) ---
-        const COLLECT_VALUE = 20;          // score gained per POINTS collectible
-        const COLLECT_RADIUS = 26;         // collectible half-height (px) — the pickup box hugs the artwork
-        const COLLECT_SPAWN_MIN = 1.5;     // min time between collectibles (s)
-        const COLLECT_SPAWN_MAX = 3.5;     // max time between collectibles (s)
-        const COLLECT_WEIGHT_JETPACK = 0.30; // chance a spawned collectible is a JETPACK token (refills fuel)
-        const COLLECT_WEIGHT_HEART = 0.10;   // chance it is a heart (+1 life; points instead when hearts are full)
-        // ...the rest are points
-
-        // --- Lives (hearts) ---
-        const LIVES_START = 1;             // hearts at the start of a run (1 = the next hit ends it)
-        const LIVES_MAX = 3;               // most hearts you can carry
-        const HURT_INVINCIBLE_T = 1.5;     // after losing a heart the runner blinks and can't be hit (s)
-        const VOID_BOUNCE_VELOCITY = 1650; // a heart lost in a hole throws the runner back up this fast (px/s)
-
-        // --- Jetpack (the runner's "magic power", runs on fuel refilled by collectible_jetpack) ---
-        // Holding the button once the jump has peaked (or while falling) fires it: an
-        // instant upward kick, then real thrust that beats gravity, while the runner
-        // surges forward and the world rushes past faster. It pulls you out of a hole.
-        const FUEL_MAX = 3.0;              // max seconds of thrust the tank can hold
-        const FUEL_START = 1.5;            // fuel at the start of a run (s)
-        const FUEL_REFILL = 1.0;           // fuel given by one JETPACK token (s)
-        const JET_KICK = 520;              // instant upward speed on ignition (px/s) — the "whoosh"
-        const JET_THRUST = 6200;           // upward acceleration while firing (px/s², GRAVITY is 4086)
-        const JET_MAX_RISE = 560;          // climb speed cap (px/s)
-        const JET_CEILING = 115;           // highest the jetpack lifts the player's top edge (px): just
-        // under the HUD (fuel + hearts), still above the highest pigeon
-        const JET_SPEED_BOOST = 0.45;      // world scrolls up to +45% faster while firing
-        const JET_PUSH_X = 70;             // the runner surges this far forward on screen (px)
-        const JET_SPOOL_UP = 7;            // how fast the boost kicks in (1/s)
-        const JET_SPOOL_DOWN = 2.5;        // how fast it fades after the jetpack stops (1/s)
-
-        // --- HUD placement ---
-        const HUD_INSET_X = 40;            // horizontal distance of the HUD from the screen edges (px)
-        const HUD_INSET_Y = 40;            // vertical distance of the HUD from the top (px)
-
-        // --- Juice / feedback ---
-        const FLASH_DURATION = 0.12;       // duration of screen flashes (s)
-        const SHAKE_DURATION = 0.35;       // duration of screen shake on death (s)
-        const SHAKE_STRENGTH = 7;          // max shake offset (px)
-        const RESTART_LOCK = 0.5;          // delay before the leaderboard (after a death) accepts a press (s)
+        // --- Audio ---
         const SOUND_VOLUME = 0.07;         // master volume of the little beeps (0 = mute)
 
         /* =====================================================================
@@ -540,7 +392,6 @@
             return uaMobile || iPadOnMac || !(finePointer && canHover);
         }
 
-
         function isDesktop() {
             return !isTouchOnlyDevice();
         }
@@ -549,7 +400,6 @@
             blocked = !isDesktop();
             gate.hidden = !blocked;
             screenEl.style.visibility = blocked ? "hidden" : "visible";
-            if (blocked) releaseButton(); // never leave the jump button stuck down
         }
         window.addEventListener("resize", updateDesktopGate);
         window.addEventListener("orientationchange", updateDesktopGate);
@@ -568,26 +418,9 @@
             "leaf_1", "cherry_blossom", "tancho_koi",
             ...HOME_FLOATERS.map(f => f.slot),
             "title", "katana", "samurai", "eye",
-            // START sequence: the portal's swirl
+            // The crossing: the portal's swirl and the red gummy's run cycle
             ...Array.from({ length: PORTAL_FRAME_COUNT }, (_, i) => "Portal/portal_" + (i + 1)),
-            // Player: the red gummy. The run cycle (Gummy_run/gummy_run_1..RUN_FRAME_COUNT) is in;
-            // the other states fall back to the run frame until they are drawn.
-            ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => runSlot(i + 1)),
-            "gummy_hold_1", "gummy_hold_2", "gummy_hold_3",
-            "gummy_jump", "gummy_doublejump", "gummy_hurt",
-            // Obstacles (2 animation frames each)
-            "koala_running_1", "koala_running_2",
-            "pigeon_1", "pigeon_2",
-            // Collectibles (collectible_shrimp.png is in assets/ but not wired in yet)
-            "collectible_points", "collectible_jetpack", "collectible_heart",
-            // Death sequence
-            "gameover_player_1", "gameover_player_2", "gameover_player_3",
-            "gameover_player_4", "gameover_player_5", "gameover_player_6",
-            "gameover_player_7",
-            // Leaderboard
-            "leaderboard_bg", "leaderboard_player",
-            "leaderboard_player_1", "leaderboard_player_2",
-            "leaderboard_player_3", "leaderboard_player_4"
+            ...Array.from({ length: RUN_FRAME_COUNT }, (_, i) => runSlot(i + 1))
         ];
         const assets = {}; // only slots whose PNG actually loaded end up in here
         let assetsSettled = 0; // slots that finished loading OR turned out missing (drives the LOADING bar)
@@ -601,22 +434,18 @@
         function allAssetsSettled() { return assetsSettled >= ASSET_SLOTS.length; }
 
         // Some source images have transparent padding around the artwork. This table
-        // (opaque pixel bounds, measured from the PNGs) lets drawSlot render ONLY the
-        // artwork — so the drawn rect, and therefore the hitbox, hugs the visible
-        // pixels on all four sides. Re-measure if these images are replaced.
+        // (opaque pixel bounds, measured from the PNGs) lets the draw functions below
+        // render ONLY the artwork, hugging the visible pixels on all four sides.
+        // Re-measure if these images are replaced.
         const SPRITE_TRIM = {
-            "leaderboard_player_1": { x: 133, y: 220, w: 758, h: 639 },
-            "leaderboard_player_2": { x: 99, y: 191, w: 628, h: 640 },
-            "leaderboard_player_3": { x: 200, y: 216, w: 616, h: 616 },
-            "leaderboard_player_4": { x: 304, y: 155, w: 467, h: 670 },
             // Title-screen sprites exported at the full 1280x720 canvas: only their
             // artwork is drawn (moved, scaled, mirrored)
             "leaf_1": { x: 612, y: 360, w: 40, h: 45 },
             "cherry_blossom": { x: 772, y: 276, w: 41, h: 40 },
             "tancho_koi": { x: 550, y: 507, w: 102, h: 152 }
             // Deliberately NOT trimmed: animation frames that share a canvas
-            // (koala_running_*, pigeon_*, gameover_player_*) — trimming each one
-            // separately would make them jitter frame to frame.
+            // (Gummy_run/*, Portal/*) — trimming each one separately would make them
+            // jitter frame to frame.
         };
 
         // The part of a slot's image to draw: its SPRITE_TRIM rect (when the image is big
@@ -624,16 +453,6 @@
         function spriteRect(slot, img) {
             const t = SPRITE_TRIM[slot];
             return t && t.x + t.w <= img.width && t.y + t.h <= img.height ? t : { x: 0, y: 0, w: img.width, h: img.height };
-        }
-
-        // Draws the slot image stretched to (x, y, w, h), using its trim when measured.
-        // Returns true if drawn, false so the caller draws the fallback shape.
-        function drawSlot(name, x, y, w, h) {
-            const img = assets[name];
-            if (!img) return false;
-            const t = spriteRect(name, img);
-            ctx.drawImage(img, t.x, t.y, t.w, t.h, x, y, w, h);
-            return true;
         }
 
         // Draws a slot's artwork at its native size (x scale when given) with its
@@ -687,73 +506,14 @@
             return n;
         }
 
-        // width/height ratio of a slot's VISIBLE artwork (trimmed if measured)
-        function slotAspect(name) {
-            const t = SPRITE_TRIM[name];
-            if (t) return t.w / t.h;
-            const img = assets[name];
-            return img ? img.width / img.height : 1;
-        }
-
-        // Game state machine — one screen at a time:
-        // "boot" -> "home" -> "intro" -> "playing" -> "dying" -> "leaderboard"
+        // Screens: "boot" (LOADING) -> "home" (the title screen, for good)
         let state = "boot";
         let bootTime = 0;              // time spent on the LOADING screen (s)
         let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
         let homeMenuTime = 0;          // time since PRESS START appeared (drives its fade-in)
-        let introTime = 0;             // time elapsed in the intro cinematic (s)
-        let deathTimer = 0;            // counts down the death mini-sequence
-
-        // Best score, persisted in localStorage (wrapped in try/catch for file:// quirks)
-        let bestScore = 0;
-        try { bestScore = Number(localStorage.getItem("dgm_best")) || 0; } catch (e) { }
-
-        // Run variables (initialized in resetRun)
-        let player, obstacles, gaps, collectibles, particles, popups;
-        let score, runTime, currentSpeed, worldX;
-        let hazardTimer, collectTimer;
-        let holding = false;       // is the jump button currently held? (drives the jetpack)
-        let jumpBufferTimer = 0;   // time left on a buffered jump press
-        let flashTimer = 0, flashColor = "#fff";
-        let shakeTimer = 0, shakePower = SHAKE_STRENGTH;
-        let gameOverTime = 0;      // when the leaderboard came up after a death, used for the restart lock
-        let deathCause = "";       // short reason shown under GAME OVER in the death sequence
-        let squash = 1;            // visual-only vertical squash of the player (landing feedback)
-        let fuel = 0;              // seconds of jetpack thrust left in the tank
-        let jetPower = 0;          // 0..1, eased: how hard the jetpack boost is currently pushing
-        let lives = 0;             // hearts left (0 = the run is over)
-        let invincibleTimer = 0;   // blinking grace period right after losing a heart (s)
-        let paused = false;        // "P" pauses the run (world frozen, overlay shown)
-
-        function resetRun() {
-            player = {
-                x: PLAYER_X,
-                y: GROUND_Y - PLAYER_H,
-                vy: 0,               // vertical speed (positive = falling)
-                grounded: true,
-                jumpsUsed: 0,        // 0 = fresh, 1 = jumped, 2 = double jump used
-                coyoteTimer: 0,      // time since the player left the ground without jumping
-                jetting: false       // is the jetpack firing right now?
-            };
-            obstacles = [];        // {type:'ground'|'overhead', x, y, w, h}
-            gaps = [];             // {x, w} holes in the ground
-            collectibles = [];     // {x, y, r}
-            particles = [];        // {x, y, vx, vy, life, color, size}
-            popups = [];           // floating texts {x, y, text, life, color}
-            score = 0;
-            runTime = 0;
-            currentSpeed = BASE_SPEED;
-            worldX = 0;            // total distance traveled, used for ground marks animation
-            paused = false;
-            hazardTimer = 1.2;     // small breather before the first obstacle
-            collectTimer = 2.0;
-            jumpBufferTimer = 0;
-            squash = 1;
-            fuel = FUEL_START;
-            jetPower = 0;
-            lives = LIVES_START;
-            invincibleTimer = 0;
-        }
+        let notAvailableTime = 0;      // NOT AVAILABLE YET stays up while this is above 0 (s)
+        let crossingTime = -1;         // time since the gummy's crossing started (s), -1 = none on screen
+        let crossingWait = randIn(PORTAL_GAP); // time before the next crossing (s)
 
         /* =====================================================================
            AUDIO — the AudioContext, and the little coded beeps (the sound files are in MIX below)
@@ -772,9 +532,10 @@
         // in <audio> mode, which has no buses
         function sfxOutput() { return mix && mix.sfx ? mix.sfx : audioCtx.destination; }
 
-        // Plays a short beep. freqFrom/freqTo lets us do little pitch slides.
+        // Plays a short beep. freqFrom/freqTo lets us do little pitch slides. Silent while
+        // sound is still off: a beep queued then would all go off at once on the first click.
         function beep(freqFrom, freqTo, dur, type) {
-            if (!audioCtx || SOUND_VOLUME <= 0) return;
+            if (!audioCtx || audioCtx.state !== "running" || SOUND_VOLUME <= 0) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             const t = audioCtx.currentTime;
@@ -788,44 +549,10 @@
             osc.stop(t + dur);
         }
 
-        const sndJump = () => beep(300, 520, 0.10, "square");
-        const sndDoubleJump = () => beep(420, 700, 0.10, "square");
-        const sndCollect = () => beep(700, 1100, 0.09, "sine");
-        const sndJetpack = () => beep(400, 800, 0.12, "triangle");
-        const sndHeart = () => beep(520, 1040, 0.18, "sine");
-        const sndSmash = () => beep(250, 90, 0.15, "square");
-        const sndDeath = () => beep(220, 40, 0.45, "sawtooth");
-        const sndPortal = () => beep(180, 760, 0.4, "triangle"); // a portal opening
         const sndWhoosh = () => beep(900, 140, 0.25, "sine");    // the gummy vanishing into it
-        const sndJetIgnite = () => beep(120, 900, 0.22, "sawtooth"); // jetpack whoosh
-        const sndJetEmpty = () => beep(220, 60, 0.25, "square");     // out of fuel sputter
-
-        // Low rumble that loops for as long as the jetpack fires
-        let jetHum = null;
-        function jetHumStart() {
-            if (!audioCtx || SOUND_VOLUME <= 0 || jetHum) return;
-            const osc = audioCtx.createOscillator();
-            const filter = audioCtx.createBiquadFilter();
-            const gain = audioCtx.createGain();
-            osc.type = "sawtooth";
-            osc.frequency.value = 70;
-            filter.type = "lowpass";
-            filter.frequency.value = 500;
-            gain.gain.value = SOUND_VOLUME * 0.9;
-            osc.connect(filter).connect(gain).connect(sfxOutput());
-            osc.start();
-            jetHum = { osc, gain };
-        }
-        function jetHumStop() {
-            if (!jetHum) return;
-            const t = audioCtx.currentTime;
-            jetHum.gain.gain.setTargetAtTime(0, t, 0.05);
-            jetHum.osc.stop(t + 0.3);
-            jetHum = null;
-        }
 
         /* =====================================================================
-           MIX — the music and sounds (assets/Music/*.wav)
+           MIX — the music and sounds (assets/Music/)
            Two buses, MUSIC and SFX, into MASTER, then a safety limiter so the sum
            never clips. A missing file just stays silent.
            Browsers keep all sound off until the first click / key press: a press
@@ -835,10 +562,11 @@
 
         // --- Volumes (0..1): tweak these ---
         const MIX_MASTER = 0.9;            // everything (the limiter adds back ~+0.9 dB)
-        const MIX_MUSIC = 1.0;             // MUSIC bus: the theme
+        const MIX_MUSIC = 0.4;             // MUSIC bus: the theme
         const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
         const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
+        const MIX_PORTAL = 0.5;            // a portal's swirl, while it is open (coded: see portalSound)
         // --- Feel ---
         const MIX_FADE_IN = 2.5;           // the theme fades in when it starts (s), then never stops
         const MIX_VARY_GAIN = [0.85, 1];   // each splash a little louder or softer (x its volume)...
@@ -846,10 +574,15 @@
         const MIX_PAN = 0.3;               // stereo: a sound at the edge of the screen sits this far to that side (0..1)
         // --- Files and timing ---
         const SOUND_FILES = {
-            theme: "Music/theme",
-            tanchoJump: "Music/tancho_koi_jump",
-            tanchoSplash: "Music/tancho_koi_splash"
+            theme: "Music/theme.mp3",
+            tanchoJump: "Music/tancho_koi_jump.wav",
+            tanchoSplash: "Music/tancho_koi_splash.wav"
         };
+        // The theme loops on its own length, not the MP3's: an MP3 carries a little silence
+        // before and after the music (the encoder's padding), which some browsers keep when
+        // they decode it. Measure THEME_LENGTH again if theme.mp3 changes.
+        const THEME_LENGTH = 119.44;       // the music itself (s): theme.wav's exact length
+        const MP3_PADDING = 1105 / 48000;  // the silence the MP3 encoder puts before it (s)
         // Where the sound actually hits in each file (s): it is lined up so that this
         // moment, not the start of the file, lands on the frame it goes with.
         const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09 };
@@ -870,7 +603,7 @@
             if (MIX_ELEMENTS) {
                 mix = {};
                 for (const [name, file] of Object.entries(SOUND_FILES)) {
-                    const el = new Audio("assets/" + file + ".wav");
+                    const el = new Audio("assets/" + file);
                     el.preload = "auto";
                     const ready = () => { if (!sounds[name]) { sounds[name] = el; if (name === "theme" && themeWanted) startTheme(); } };
                     el.addEventListener("canplaythrough", ready);
@@ -893,7 +626,7 @@
             mix.music.connect(mix.master);
             mix.sfx.connect(mix.master);
             for (const [name, file] of Object.entries(SOUND_FILES)) {
-                fetch("assets/" + file + ".wav")
+                fetch("assets/" + file)
                     .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
                     .then(data => new Promise((ok, fail) => audioCtx.decodeAudioData(data, ok, fail)))
                     .then(buffer => { sounds[name] = buffer; if (name === "theme" && themeWanted) startTheme(); })
@@ -936,12 +669,16 @@
             }
             theme = audioCtx.createBufferSource();
             theme.buffer = sounds.theme;
+            // Loop on the music alone: past the MP3's leading silence when the browser kept it
+            const pad = sounds.theme.duration > THEME_LENGTH + 0.01 ? MP3_PADDING : 0;
             theme.loop = true;
+            theme.loopStart = pad;
+            theme.loopEnd = pad + THEME_LENGTH;
             theme.connect(mix.music);
             const t = audioCtx.currentTime;
             mix.music.gain.setValueAtTime(0, t);
             mix.music.gain.linearRampToValueAtTime(MIX_MUSIC, t + MIX_FADE_IN);
-            theme.start(t);
+            theme.start(t, pad);
         }
         // <audio> mode, every frame: the theme's fade-in
         function mixTick() {
@@ -989,34 +726,76 @@
             src.start(t, Math.max(0, skip || 0));
         }
 
-        /* =====================================================================
-           JUICE HELPERS
-           ===================================================================== */
-
-        function flash(color, dur) { flashColor = color; flashTimer = dur || FLASH_DURATION; }
-        function shake(power) { shakeTimer = SHAKE_DURATION; shakePower = power || SHAKE_STRENGTH; }
-
-        function addPopup(x, y, text, color) {
-            popups.push({ x, y, text, color, life: 0.8 });
-        }
-
-        function burst(x, y, color, count, speed) {
-            for (let i = 0; i < count; i++) {
-                const a = Math.random() * Math.PI * 2;
-                const s = (0.3 + Math.random() * 0.7) * speed;
-                particles.push({
-                    x, y,
-                    vx: Math.cos(a) * s,
-                    vy: Math.sin(a) * s - 60,
-                    life: 0.4 + Math.random() * 0.3,
-                    color,
-                    size: 2 + Math.random() * 3
-                });
+        // A portal's sound, coded (no file): a rush of air through a band-pass whose pitch
+        // wobbles like the swirl, over a low wobbling hum. It swells up as the portal opens,
+        // holds while it is open, and sinks away as it closes, openFor s after it started
+        // opening. Panned to the portal's side (x, px on screen).
+        const PORTAL_SWIRL_HZ = 2.5;       // how fast the rush wobbles (per s)
+        let portalNoise = null;            // 2s of white noise, looped, built on first use
+        function portalSound(x, openFor) {
+            if (!audioCtx || audioCtx.state !== "running" || MIX_PORTAL <= 0) return;
+            const t = audioCtx.currentTime, closeAt = t + openFor, end = closeAt + PORTAL_OPEN_T;
+            if (!portalNoise) {
+                portalNoise = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+                const data = portalNoise.getChannelData(0);
+                for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+            }
+            // Swell / hold / fade of the whole sound
+            const out = audioCtx.createGain();
+            out.gain.setValueAtTime(0.0001, t);
+            out.gain.exponentialRampToValueAtTime(MIX_PORTAL, t + PORTAL_OPEN_T);
+            out.gain.setValueAtTime(MIX_PORTAL, closeAt);
+            out.gain.exponentialRampToValueAtTime(0.0001, end);
+            let node = out;
+            if (audioCtx.createStereoPanner) {
+                const pan = audioCtx.createStereoPanner();
+                pan.pan.value = Math.max(-1, Math.min(1, (x / W * 2 - 1) * MIX_PAN));
+                node = node.connect(pan);
+            }
+            node.connect(sfxOutput());
+            const sources = [];
+            // The rush: noise through a band-pass that rises as it opens, sinks as it
+            // closes, and wobbles up and down all along
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = portalNoise;
+            noise.loop = true;
+            const band = audioCtx.createBiquadFilter();
+            band.type = "bandpass";
+            band.Q.value = 4;
+            band.frequency.setValueAtTime(250, t);
+            band.frequency.exponentialRampToValueAtTime(900, t + PORTAL_OPEN_T);
+            band.frequency.setValueAtTime(900, closeAt);
+            band.frequency.exponentialRampToValueAtTime(200, end);
+            const swirl = audioCtx.createOscillator();
+            swirl.frequency.value = PORTAL_SWIRL_HZ;
+            const swirlDepth = audioCtx.createGain();
+            swirlDepth.gain.value = 500; // cents up and down
+            swirl.connect(swirlDepth).connect(band.detune);
+            const rushGain = audioCtx.createGain();
+            rushGain.gain.value = 3; // a narrow band of noise is quiet: brought up to the hum's level
+            noise.connect(band).connect(rushGain).connect(out);
+            sources.push(noise, swirl);
+            // The hum: two triangles a few Hz apart (they beat), gliding up as it opens
+            for (const f of [70, 74]) {
+                const hum = audioCtx.createOscillator();
+                hum.type = "triangle";
+                hum.frequency.setValueAtTime(f * 0.6, t);
+                hum.frequency.exponentialRampToValueAtTime(f, t + PORTAL_OPEN_T);
+                hum.frequency.setValueAtTime(f, closeAt);
+                hum.frequency.exponentialRampToValueAtTime(f * 0.5, end);
+                const humGain = audioCtx.createGain();
+                humGain.gain.value = 0.08;
+                hum.connect(humGain).connect(out);
+                sources.push(hum);
+            }
+            for (const src of sources) {
+                src.start(t);
+                src.stop(end + 0.05);
             }
         }
 
         /* =====================================================================
-           INPUT — one button: Space / click / tap. Press = jump, hold = JETPACK.
+           SCREEN FLOW & INPUT — any press on the title screen: Space / Enter / click / tap
            ===================================================================== */
 
         // --- Screen flow helpers ---
@@ -1034,429 +813,72 @@
         });
         setTimeout(() => { fontSettled = true; }, LOADING_MAX_T * 1000);
         function homeReady() { return allAssetsSettled() && fontSettled; }
-        function startIntro() {
-            // The START sequence (portal, gummy run, portal) plays every time START
-            // is pressed — it IS the transition into the run.
-            state = "intro";
-            introTime = 0;
-            sndPortal();
-        }
-        function startPlaying() { resetRun(); state = "playing"; }
 
-        // Key moments of the START sequence (s since START), from the constants above
+        // Key moments of a crossing (s since it started), from the constants above
         // and the gummy's own width:
         //   0 .. run          the left portal opens, and swirls PORTAL_WAIT_T before he comes out
         //   .. leftClose      the gummy is fully out of it, it closes behind him
         //   rightOpen         the right portal opens ~1s before he gets there
         //   .. arrive         he is fully inside it, it closes
-        //   fade .. end       fade to black, the run starts
-        function introTimeline() {
+        //   end               both portals are closed: the next pause starts
+        function crossingTimeline() {
             const gw = gummyWidth();
             const run = PORTAL_OPEN_T + PORTAL_WAIT_T;
-            const arrive = run + (PORTAL_RIGHT_X - PORTAL_LEFT_X + gw) / INTRO_GUMMY_SPEED;
-            const leftClose = run + gw / INTRO_GUMMY_SPEED + PORTAL_HOLD_T;
+            const arrive = run + (PORTAL_RIGHT_X - PORTAL_LEFT_X + gw) / CROSSING_GUMMY_SPEED;
+            const leftClose = run + gw / CROSSING_GUMMY_SPEED + PORTAL_HOLD_T;
             const rightOpen = Math.max(0, arrive - 1.0 - PORTAL_OPEN_T);
-            const fade = arrive + PORTAL_OPEN_T;
-            return { run, leftClose, rightOpen, arrive, fade, end: fade + INTRO_FADE_T };
+            return { run, leftClose, rightOpen, arrive, end: arrive + PORTAL_OPEN_T };
         }
 
-        // Converts a mouse/touch event into GAME coordinates (0..W, 0..H): the canvas
-        // is the screen, only scaled by CSS.
-        function canvasPos(e) {
-            const rect = canvas.getBoundingClientRect();
-            const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
-            const cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
-            return {
-                x: (cx - rect.left) * W / rect.width,
-                y: (cy - rect.top) * H / rect.height
-            };
-        }
-
-        // The single action button (Space / click / tap) — behavior depends on the screen
-        function pressButton(clickPos) {
-            if (paused && state === "playing") return; // frozen: only "P" resumes
-            holding = true;
-
-            switch (state) {
-                case "boot":
-                    return; // the LOADING screen can't be skipped: it has to finish
-
-                case "home": {
-                    // The first press ever, if sound was still off, only turns it on (see unlockSound)
-                    if (pressUnlocksSound) { pressUnlocksSound = false; return; }
-                    // PRESS START only responds once the whole title screen is up; then
-                    // any press (key, click, tap — anywhere) starts
-                    if (!homeReady()) return;
-                    beep(600, 900, 0.08, "square"); // confirm blip
-                    startIntro();
-                    return;
-                }
-
-                case "intro":
-                    return; // the START sequence can't be skipped: the run starts when it ends
-
-                case "dying":
-                    return; // no input during the death sequence
-
-                case "leaderboard": {
-                    // brief lock right after a death so the leaderboard isn't skipped by accident
-                    if (performance.now() - gameOverTime < RESTART_LOCK * 1000) return;
-                    // A click/tap on one of the buttons triggers it; anything else goes home
-                    if (clickPos) {
-                        const b = leaderboardButtons().find(b =>
-                            clickPos.x >= b.x && clickPos.x <= b.x + b.w &&
-                            clickPos.y >= b.y && clickPos.y <= b.y + b.h);
-                        if (b) { leaderboardButtonAction(b.id); return; }
-                    }
-                    // Any other press starts a NEW GAME. Restarts go straight into the run:
-                    // the home sequence is the START flow, not something to sit through again.
-                    startPlaying();
-                    return;
-                }
-            }
-
-            // state === "playing": try to jump
-            const canGroundJump = player.grounded || (player.coyoteTimer < COYOTE_TIME && player.jumpsUsed === 0);
-            if (canGroundJump) {
-                doJump(JUMP_VELOCITY, 1);
-                sndJump();
-            } else if (player.jumpsUsed < 2) {
-                doJump(DOUBLE_JUMP_VELOCITY, 2);
-                sndDoubleJump();
-            } else {
-                // No jump available: buffer the press so it fires the instant we land
-                jumpBufferTimer = JUMP_BUFFER_TIME;
-            }
-        }
-
-        function doJump(velocity, jumpsUsedValue) {
-            player.vy = -velocity;
-            player.grounded = false;
-            player.jumpsUsed = jumpsUsedValue;
-            squash = 1.15; // slight vertical stretch on takeoff (visual only)
-        }
-
-        function releaseButton() {
-            holding = false;
-            if (state !== "playing") return;
-            cutJet(false); // letting go shuts the jetpack off instantly
-            // "Jump cut": releasing while still going up shortens the jump => tap = small hop
-            if (player.vy < 0) player.vy *= JUMP_CUT_MULT;
-        }
-
-        // Where the jetpack flame comes out: low on the runner's back (he faces right)
-        function jetNozzle() { return { x: player.x + 16, y: player.y + PLAYER_H * 0.62 }; }
-
-        // Jetpack ignition: this is the "magic power" moment, so it has to hit hard —
-        // an instant upward kick, a flash, a shake, a burst of fire and a whoosh.
-        function igniteJet() {
-            player.jetting = true;
-            const rescue = player.y + PLAYER_H > GROUND_Y + 6; // already sinking into a hole
-            if (player.y > JET_CEILING) player.vy = Math.min(player.vy, -JET_KICK);
-            squash = 1.2;
-            flash("#ffb030", 0.1);
-            shake(rescue ? 6 : 3);
-            const n = jetNozzle();
-            burst(n.x, n.y, "#ff9a20", 14, 320);
-            sndJetIgnite();
-            jetHumStart();
-        }
-
-        function cutJet(outOfFuel) {
-            if (!player.jetting) return;
-            player.jetting = false;
-            jetHumStop();
-            if (outOfFuel) sndJetEmpty();
-        }
-
-        // Keyboard: Space / Enter / ArrowUp = the action button everywhere; P = pause
-        window.addEventListener("keydown", (e) => {
-            if (blocked) return; // the "get a PC" screen swallows every input
-            if (!["Space", "Enter", "ArrowUp", "KeyP"].includes(e.code)) return;
-            e.preventDefault();
-            if (e.repeat) return; // ignore auto-repeat, we handle "hold" ourselves
-            if (e.code === "KeyP") {
-                // "P" toggles pause, only during a run
-                if (state === "playing") {
-                    paused = !paused;
-                    if (paused) cutJet(false); // no rumble frozen under the pause
-                }
+        // Waits a random PORTAL_GAP, plays one crossing, and again
+        function updateCrossing(dt) {
+            if (crossingTime < 0) {
+                if ((crossingWait -= dt) > 0) return;
+                crossingTime = 0;
+                portalSound(PORTAL_LEFT_X, crossingTimeline().leftClose);
                 return;
             }
+            const before = crossingTime;
+            crossingTime += dt;
+            const tl = crossingTimeline();
+            if (before < tl.rightOpen && crossingTime >= tl.rightOpen) portalSound(PORTAL_RIGHT_X, tl.arrive - tl.rightOpen);
+            if (before < tl.arrive && crossingTime >= tl.arrive) sndWhoosh();
+            if (crossingTime >= tl.end) {
+                crossingTime = -1;
+                crossingWait = randIn(PORTAL_GAP);
+            }
+        }
+
+        // Any press (key, click, tap — anywhere) on the title screen: PRESS START is
+        // not wired to a game yet, so it shows NOT AVAILABLE YET instead
+        function pressButton() {
+            if (state !== "home") return; // the LOADING screen can't be skipped
+            // The first press ever, if sound was still off, only turns it on (see unlockSound)
+            if (pressUnlocksSound) { pressUnlocksSound = false; return; }
+            if (!homeReady()) return; // PRESS START is not up yet
+            beep(600, 900, 0.08, "square"); // confirm blip
+            notAvailableTime = NOT_AVAILABLE_T;
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (blocked) return; // the "get a PC" screen swallows every input
+            if (!["Space", "Enter", "ArrowUp"].includes(e.code)) return;
+            e.preventDefault();
+            if (e.repeat) return;
             pressButton();
         });
-        window.addEventListener("keyup", (e) => {
-            if (e.code === "Space" || e.code === "Enter" || e.code === "ArrowUp") releaseButton();
-        });
-
-        // Mouse & touch are captured on the WHOLE window: on a phone you can tap
-        // anywhere on the screen to jump, not just on the console art.
-        window.addEventListener("mousedown", (e) => { if (blocked) return; e.preventDefault(); pressButton(canvasPos(e)); });
-        window.addEventListener("mouseup", releaseButton);
-
-        window.addEventListener("touchstart", (e) => { if (blocked) return; e.preventDefault(); pressButton(canvasPos(e)); }, { passive: false });
-        window.addEventListener("touchend", (e) => { e.preventDefault(); releaseButton(); }, { passive: false });
-        window.addEventListener("touchcancel", releaseButton);
+        window.addEventListener("pointerdown", (e) => { if (blocked) return; e.preventDefault(); pressButton(); }); // mouse, pen and touch
 
         /* =====================================================================
-           PROCEDURAL GENERATION
+           RANDOM HELPERS
            ===================================================================== */
 
         function rand(min, max) { return min + Math.random() * (max - min); }
         function randIn(range) { return rand(range[0], range[1]); } // range = [min, max]
 
-        // Base slot name for an obstacle type ("koala_running" / "pigeon")
-        function obstacleBaseName(type) {
-            return type === "ground" ? "koala_running" : "pigeon";
-        }
-
-        // How many animation frames actually loaded for this obstacle type (0 = none)
-        function obstacleFrameCount(type) {
-            return loadedFrames(obstacleBaseName(type), 2);
-        }
-
-        // The slot to DRAW for this obstacle right now. The koala and the pigeon are
-        // 2-frame loops; each obstacle carries its own animOff so they do not all flap
-        // in lockstep. Returns null when no image loaded (a plain rect is drawn).
-        function obstacleFrameSlot(o) {
-            const base = obstacleBaseName(o.type);
-            const n = obstacleFrameCount(o.type);
-            if (n === 0) return null;
-            const fps = o.type === "ground" ? KOALA_ANIM_FPS : PIGEON_ANIM_FPS;
-            const f = Math.floor(performance.now() / 1000 * fps + o.animOff) % n;
-            return base + "_" + (f + 1);
-        }
-
-        // The full sprite FRAME rect (what gets drawn). The obstacle's x/y/w/h is its
-        // hitbox, so the frame is offset from it by the dx/dy computed at spawn time.
-        function obstacleFrameRect(o) {
-            return { x: o.x + o.dx, y: o.y + o.dy, w: o.fw, h: o.fh };
-        }
-
-        // The obstacle's COLLISION box: its x/y/w/h, the fixed box on the creature's body
-        // (see OBSTACLE_BODY_BOX), which never moves with the animation
-        function obstacleHitbox(o) {
-            return { x: o.x, y: o.y, w: o.w, h: o.h };
-        }
-
-        // The pigeon's y for its current position along the screen. Both paths are
-        // anchored on o.baseY — the bird's LOWEST point, bottom edge on the overhead
-        // clearance line — and only ever lift it ABOVE that, so running underneath
-        // always stays possible.
-        //   "wave"     bobs up and down as it crosses
-        //   "diagonal" enters high and glides steadily down to the clearance line
-        function pigeonY(o) {
-            if (o.motion === "diagonal") {
-                // Progress is driven by x, so the descent is smooth and speed-independent.
-                // It bottoms out at the PLAYER's column, not at the left edge — otherwise
-                // the bird would still be high when it passes him and the dive would never
-                // be felt. Past that point it simply holds the clearance line.
-                const span = W + 40 - PLAYER_X;
-                const p = Math.max(0, Math.min(1, (o.x - PLAYER_X) / span)); // 1 at spawn -> 0 at the player
-                return o.baseY - PIGEON_DIAGONAL_RISE * p;
-            }
-            // Sine mapped to [0..1] so the bird touches baseY at the bottom of each dip
-            const wave = 0.5 + 0.5 * Math.sin(runTime * PIGEON_WAVE_SPEED + o.wavePhase);
-            return o.baseY - PIGEON_WAVE_AMPLITUDE * wave;
-        }
-
-        // Turns a body height into the full frame rect offsets. The size presets always
-        // describe the BODY (the part the player must clear), so difficulty stays
-        // predictable no matter how much empty wing-space a frame carries around it.
-        function obstacleFrameMetrics(type, bodyH) {
-            const box = OBSTACLE_BODY_BOX[type];
-            const base = obstacleBaseName(type);
-            const img = assets[base + "_1"] || assets[base];
-            const fh = bodyH / (box.y1 - box.y0);
-            const fw = img ? fh * (img.width / img.height) : bodyH;
-            return {
-                fw, fh,
-                bodyW: fw * (box.x1 - box.x0),
-                dx: -fw * box.x0,   // frame left, relative to the hitbox left
-                dy: -fh * box.y0    // frame top,  relative to the hitbox top
-            };
-        }
-
-        // The collectible's slot name for its kind
-        function collectibleSlotName(kind) {
-            return "collectible_" + kind; // collectible_points / _jetpack / _heart
-        }
-
-        // Pickup box matching the drawn artwork (height = 2r, width follows the art)
-        function collectibleBox(c) {
-            const name = collectibleSlotName(c.kind);
-            const ar = assets[name] ? slotAspect(name) : 1;
-            const h = c.r * 2, w = h * ar;
-            return { x: c.x - w / 2, y: c.y - c.r, w, h };
-        }
-
-        // RULE: nothing overlaps. These are the areas a collectible must keep clear of.
-        // A pigeon is blocked over its WHOLE flight path (it bobs or dives after
-        // spawning, so its spawn position alone is not enough); a hole is blocked
-        // from the ground line down.
-        function obstacleZone(o) {
-            const f = obstacleFrameRect(o); // the drawn frame, never smaller than the hitbox
-            if (o.type !== "overhead") return f;
-            const rise = o.motion === "diagonal" ? PIGEON_DIAGONAL_RISE : PIGEON_WAVE_AMPLITUDE;
-            const top = o.baseY + o.dy - rise;
-            return { x: f.x, y: top, w: f.w, h: f.h + rise };
-        }
-        function gapZone(g) { return { x: g.x, y: GROUND_Y - 3, w: g.w, h: H - GROUND_Y + 3 }; }
-
-        function spawnHazard() {
-            const spawnX = W + 40; // just off-screen to the right
-            const roll = Math.random();
-            let zone; // the area the new hazard occupies (for the no-overlap rule)
-
-            if (roll < 0.45) {
-                // Ground obstacle (the koala cop): jump over it. The preset height is the
-                // BODY height; the frame around it is sized from the artwork's ratio.
-                const s = KOALA_SIZES[Math.floor(Math.random() * KOALA_SIZES.length)];
-                const m = obstacleFrameMetrics("ground", s.h);
-                const o = {
-                    type: "ground", animOff: Math.random() * 10,
-                    x: spawnX, y: GROUND_Y - s.h, w: m.bodyW || s.w, h: s.h,
-                    fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy
-                };
-                obstacles.push(o);
-                zone = obstacleZone(o);
-            } else if (roll < 0.75) {
-                // Overhead obstacle (the pigeon): run under it (do NOT jump). The BODY's
-                // bottom edge always sits on the same clearance line, so it stays playable
-                // however far the wings stretch outside the frame.
-                const s = PIGEON_SIZES[Math.floor(Math.random() * PIGEON_SIZES.length)];
-                const m = obstacleFrameMetrics("overhead", s.h);
-                // baseY is the bird's LOWEST position: its bottom edge on the clearance
-                // line. Every flight path only ever lifts it above that, never below, so
-                // there is always room to run underneath.
-                const baseY = GROUND_Y - PLAYER_H - OVERHEAD_CLEARANCE - s.h;
-                const o = {
-                    type: "overhead", animOff: Math.random() * 10,
-                    x: spawnX, y: baseY, baseY, w: m.bodyW || s.w, h: s.h,
-                    fw: m.fw, fh: m.fh, dx: m.dx, dy: m.dy,
-                    motion: Math.random() < PIGEON_DIAGONAL_CHANCE ? "diagonal" : "wave",
-                    wavePhase: Math.random() * Math.PI * 2
-                };
-                o.y = pigeonY(o);
-                obstacles.push(o);
-                zone = obstacleZone(o);
-            } else {
-                // Gap in the ground: jump across
-                const g = { x: spawnX, w: rand(GAP_WIDTH_MIN, GAP_WIDTH_MAX) };
-                gaps.push(g);
-                zone = gapZone(g);
-                // A gap "occupies" time on screen: push the next hazard a bit further away
-                hazardTimer += g.w / currentSpeed;
-            }
-
-            // A new hazard (obstacle OR hole) evicts any collectible it would overlap
-            collectibles = collectibles.filter(c => !overlapsWithMargin(collectibleBox(c), zone, 18));
-
-            // Time-based spacing: at higher speed the pixel distance grows automatically,
-            // so the pattern stays physically jumpable at any speed.
-            hazardTimer += rand(SPAWN_GAP_MIN, SPAWN_GAP_MAX);
-        }
-
-        function spawnCollectible() {
-            // Pick the collectible kind from the spawn weights (no heart while they are full)
-            const roll = Math.random();
-            let kind = "points";
-            if (roll < COLLECT_WEIGHT_HEART) { if (lives < LIVES_MAX) kind = "heart"; }
-            else if (roll < COLLECT_WEIGHT_HEART + COLLECT_WEIGHT_JETPACK) kind = "jetpack";
-
-            // RULE: a collectible never overlaps (or touches) an obstacle's whole flight
-            // path, a hole, or another collectible. Try a few heights near the spawn
-            // point; give up this cycle if every one is blocked.
-            const zones = obstacles.map(obstacleZone)
-                .concat(gaps.map(gapZone))
-                .concat(collectibles.map(collectibleBox));
-            for (let attempt = 0; attempt < 6; attempt++) {
-                const y = GROUND_Y - rand(41, 255); // low = grabbed running, high = needs a jump
-                const c = { x: W + 40, y, r: COLLECT_RADIUS, kind };
-                const box = collectibleBox(c);
-                if (!zones.some(z => overlapsWithMargin(box, z, 18))) { collectibles.push(c); break; }
-            }
-            collectTimer += rand(COLLECT_SPAWN_MIN, COLLECT_SPAWN_MAX);
-        }
-
-        /* =====================================================================
-           COLLISIONS
-           ===================================================================== */
-
-        // The player's collision box, slightly shrunk for forgiveness.
-        // IMPORTANT: never changes during a run — only the visuals do.
-        function playerHitbox() {
-            return {
-                x: player.x + HITBOX_PAD,
-                y: player.y + HITBOX_PAD,
-                w: PLAYER_W - HITBOX_PAD * 2,
-                h: PLAYER_H - HITBOX_PAD * 2
-            };
-        }
-
-        function rectsOverlap(a, b) {
-            return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-        }
-
-        // Overlap test with a safety margin around rect b (used for spawn rules)
-        function overlapsWithMargin(a, b, m) {
-            return a.x - m < b.x + b.w && a.x + a.w + m > b.x && a.y - m < b.y + b.h && a.y + a.h + m > b.y;
-        }
-
-        // Is the center of the player's feet currently above a hole?
-        function overGap() {
-            const footCenter = player.x + PLAYER_W / 2;
-            return gaps.some(g => footCenter > g.x && footCenter < g.x + g.w);
-        }
-
-        /* =====================================================================
-           DEATH
-           ===================================================================== */
-
-        // A hit costs a heart. With one to spare the run goes on: red flash, a thud and
-        // a short blinking invincibility. Returns false when it was the last heart.
-        function loseHeart() {
-            lives--;
-            if (lives <= 0) return false;
-            invincibleTimer = HURT_INVINCIBLE_T;
-            flash("#ff2020", 0.15);
-            shake(5);
-            sndSmash();
-            return true;
-        }
-
-        function die(cause) {
-            cutJet(false);
-            state = "dying"; // short death sequence first; the GAME OVER screen comes after
-            deathTimer = DEATH_SEQUENCE_DURATION;
-            deathCause = cause;
-            flash("#ff2020", 0.2);
-            shake();
-            sndDeath();
-            if (score > bestScore) {
-                bestScore = Math.floor(score);
-                try { localStorage.setItem("dgm_best", String(bestScore)); } catch (e) { }
-            }
-            // Online (signed-in players only): push the score — the DB keeps only the
-            // best — then refresh the global board. Fire-and-forget: any network
-            // failure is swallowed and the game never waits on it.
-            if (sbUser) {
-                try { submitScore(sbUser, Math.floor(score)).then(refreshOnline).catch(() => { }); } catch (e) { }
-            }
-        }
-
         function update(dt) {
-            // Paused: the whole world (and its juice) stands still
-            if (paused && state === "playing") return;
+            if (state === "home") updateHomeScene(dt); // the forest keeps living
 
-            // --- Global timers (run in every state, for juice) ---
-            if (flashTimer > 0) flashTimer -= dt;
-            if (shakeTimer > 0) shakeTimer -= dt;
-            if (state === "home" || state === "intro") updateHomeScene(dt); // the forest keeps living
-            updateParticles(dt);
-            updatePopups(dt);
-
-            // --- Screen flow timers ---
             if (state === "boot") {
                 if (!mix) ensureAudio(); // the sounds start loading now (they stay silent until a click)
                 // The LOADING screen waits for the images, with a floor and a ceiling on
@@ -1464,194 +886,12 @@
                 bootTime += dt;
                 if (loadingProgress() >= 1) bootDoneTime += dt;
                 if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) goHome();
-            } else if (state === "home") {
-                if (homeReady()) {
-                    homeMenuTime += dt; // PRESS START fades in
-                    if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
-                }
-            } else if (state === "intro") {
-                const before = introTime;
-                introTime += dt;
-                const tl = introTimeline();
-                if (before < tl.rightOpen && introTime >= tl.rightOpen) sndPortal();
-                if (before < tl.arrive && introTime >= tl.arrive) sndWhoosh();
-                if (introTime >= tl.end) startPlaying();
-            } else if (state === "dying") {
-                // The koala reaching the player is a beat of its own: a thud and a shake,
-                // fired exactly once as the sequence crosses DEATH_CATCH_FRAC.
-                const catchAt = DEATH_SEQUENCE_DURATION * (1 - DEATH_CATCH_FRAC);
-                const before = deathTimer;
-                deathTimer -= dt;
-                if (before > catchAt && deathTimer <= catchAt) {
-                    shake();
-                    sndSmash();
-                }
-                if (deathTimer <= 0) {
-                    // The death sequence flows STRAIGHT into the leaderboard (no menu screen)
-                    state = "leaderboard";
-                    gameOverTime = performance.now(); // short input lock so a press can't skip it instantly
-                }
+            } else if (state === "home" && homeReady()) {
+                homeMenuTime += dt; // PRESS START fades in
+                if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
+                if (notAvailableTime > 0) notAvailableTime -= dt;
+                updateCrossing(dt);
             }
-
-            if (state !== "playing") return;
-
-            runTime += dt;
-
-            // --- Speed: ease toward the target, which ramps up with time ---
-            const targetSpeed = Math.min(MAX_SPEED, BASE_SPEED + SPEED_RAMP * runTime);
-            // Smooth easing so speed changes never feel like a hard snap
-            currentSpeed += (targetSpeed - currentSpeed) * Math.min(1, 3 * dt);
-
-            // --- Jetpack: fires while the button is held in the air, from the jump's
-            // peak onwards (so a normal jump still reaches its full height first) ---
-            const wantJet = holding && !player.grounded && fuel > 0 && (player.jetting || player.vy > 0);
-            if (wantJet && !player.jetting) igniteJet();
-            else if (!wantJet && player.jetting) cutJet(fuel <= 0);
-            // The boost spools up fast and fades gently: the runner surges forward on
-            // screen and the whole world rushes past faster
-            jetPower += ((player.jetting ? 1 : 0) - jetPower) * Math.min(1, (player.jetting ? JET_SPOOL_UP : JET_SPOOL_DOWN) * dt);
-            player.x = PLAYER_X + JET_PUSH_X * jetPower;
-
-            const dx = currentSpeed * (1 + JET_SPEED_BOOST * jetPower) * dt; // pixels traveled this frame
-            worldX += dx;
-            score += dx * SCORE_PER_PIXEL;
-
-            // --- Player physics ---
-            player.vy += GRAVITY * dt;
-
-            if (player.jetting) {
-                // Real thrust, stronger than gravity: you climb, you don't just glide.
-                // No thrust above the ceiling (a double jump can end up there): the
-                // runner sinks back down to it first, then hovers on it.
-                if (player.y >= JET_CEILING) player.vy = Math.max(player.vy - JET_THRUST * dt, -JET_MAX_RISE);
-                fuel = Math.max(0, fuel - dt);
-                // Fire and sparks spraying out of the nozzle
-                const n = jetNozzle();
-                for (let i = 0; i < 2; i++) {
-                    particles.push({
-                        x: n.x, y: n.y, vx: -rand(150, 350), vy: rand(200, 420),
-                        life: rand(0.2, 0.45), color: Math.random() < 0.5 ? "#ffb030" : "#ff5a1a", size: rand(3, 6)
-                    });
-                }
-            } else {
-                player.vy = Math.min(player.vy, MAX_FALL_SPEED);
-            }
-
-            player.y += player.vy * dt;
-            // The jetpack never climbs past its ceiling (jumps are not limited by it)
-            if (player.jetting && player.vy < 0 && player.y < JET_CEILING) { player.y = JET_CEILING; player.vy = 0; }
-
-            const standingOnGround = !overGap();
-
-            if (player.y + PLAYER_H >= GROUND_Y && standingOnGround && player.vy >= 0) {
-                // Landing
-                const wasAirborne = !player.grounded;
-                player.y = GROUND_Y - PLAYER_H;
-                player.vy = 0;
-                player.grounded = true;
-                player.jumpsUsed = 0;
-                player.coyoteTimer = 0;
-                if (wasAirborne) {
-                    squash = 0.8; // small squash on landing (visual only)
-                    // Buffered jump fires immediately for a snappy feel
-                    if (jumpBufferTimer > 0) {
-                        jumpBufferTimer = 0;
-                        doJump(JUMP_VELOCITY, 1);
-                        sndJump();
-                    }
-                }
-            } else {
-                // Airborne (jumping, or walking over a hole)
-                if (player.grounded) {
-                    player.grounded = false;
-                    player.coyoteTimer = 0; // just left the ground: coyote window starts
-                } else {
-                    player.coyoteTimer += dt;
-                }
-            }
-
-            if (jumpBufferTimer > 0) jumpBufferTimer -= dt;
-            if (invincibleTimer > 0) invincibleTimer -= dt;
-
-            // Squash eases back to 1 (visual only, hitbox untouched)
-            squash += (1 - squash) * Math.min(1, 10 * dt);
-
-            // Fell into a hole: a spare heart (or the blink right after losing one)
-            // throws the runner back up out of it; otherwise the run is over
-            if (player.y > H + 40) {
-                if (invincibleTimer > 0 || loseHeart()) {
-                    player.y = H;
-                    player.vy = -VOID_BOUNCE_VELOCITY;
-                    player.jumpsUsed = 1; // one air jump left to steer the landing
-                } else { die("fell into the void"); return; }
-            }
-
-            // --- Spawners ---
-            hazardTimer -= dt;
-            if (hazardTimer <= 0) spawnHazard();
-            collectTimer -= dt;
-            if (collectTimer <= 0) spawnCollectible();
-
-            // --- Move & clean up world objects ---
-            for (const o of obstacles) {
-                o.x -= dx;
-                // Pigeons fly: their hitbox follows the sprite, so what you see is what hits
-                if (o.type === "overhead") o.y = pigeonY(o);
-            }
-            for (const g of gaps) g.x -= dx;
-            for (const c of collectibles) c.x -= dx;
-            obstacles = obstacles.filter(o => o.x + o.w > -60);
-            gaps = gaps.filter(g => g.x + g.w > -60);
-            collectibles = collectibles.filter(c => c.x + c.r > -60);
-
-            // --- Collisions ---
-            const hb = playerHitbox();
-
-            for (let i = obstacles.length - 1; i >= 0; i--) {
-                const o = obstacles[i];
-                if (invincibleTimer > 0 || !rectsOverlap(hb, obstacleHitbox(o))) continue;
-                if (loseHeart()) continue; // a spare heart absorbs the hit
-                die(o.type === "ground" ? "caught by a koala cop" : "hit by a pigeon");
-                return;
-            }
-
-            for (let i = collectibles.length - 1; i >= 0; i--) {
-                const c = collectibles[i];
-                const box = collectibleBox(c); // pickup box = exactly the drawn artwork
-                if (rectsOverlap(hb, box)) {
-                    collectibles.splice(i, 1);
-                    if (c.kind === "jetpack") {
-                        fuel = Math.min(FUEL_MAX, fuel + FUEL_REFILL);
-                        sndJetpack();
-                    } else if (c.kind === "heart") {
-                        lives = Math.min(LIVES_MAX, lives + 1);
-                        addPopup(c.x, c.y - 14, "+❤️", "#ff3050");
-                        sndHeart();
-                    } else {
-                        score += COLLECT_VALUE;
-                        addPopup(c.x, c.y - 14, "+" + COLLECT_VALUE, "#444");
-                        sndCollect();
-                    }
-                }
-            }
-        }
-
-        function updateParticles(dt) {
-            for (const p of particles) {
-                p.life -= dt;
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-                p.vy += 500 * dt; // light gravity on particles
-            }
-            particles = particles.filter(p => p.life > 0);
-        }
-
-        function updatePopups(dt) {
-            for (const p of popups) {
-                p.life -= dt;
-                p.y -= 40 * dt; // floats upward
-            }
-            popups = popups.filter(p => p.life > 0);
         }
 
         /* =====================================================================
@@ -1663,137 +903,10 @@
             drawScreen();
         }
 
-        // One game screen, drawn in coordinates 0..W x 0..H
+        // One screen, drawn in coordinates 0..W x 0..H
         function drawScreen() {
-            if (state === "boot") { drawBoot(); return; }
-            if (state === "home") { drawHome(); return; }
-            if (state === "intro") { drawIntro(); return; }
-            if (state === "leaderboard") { drawLeaderboard(); return; }
-
-            // --- Below: the game world (states "playing" and "dying") ---
-            ctx.save();
-
-            // Screen shake offset (+ a constant rumble while the jetpack fires)
-            let s = shakeTimer > 0 ? shakePower * (shakeTimer / SHAKE_DURATION) : 0;
-            if (state === "playing" && player.jetting) s = Math.max(s, 1.6);
-            if (s > 0) ctx.translate(rand(-s, s), rand(-s, s));
-
-            // --- Backdrop (placeholder until the in-game art arrives) ---
-            drawRunBackdrop();
-            // Jetpack boost: speed streaks rushing past, behind the ground
-            drawSpeedLines();
-            // --- The ground the player runs on ---
-            drawRunGround();
-
-            // --- Holes cut into the ground ---
-            const holeTop = GROUND_Y - 3;
-            ctx.fillStyle = "#1c1c1c";
-            for (const g of gaps) ctx.fillRect(g.x, holeTop, g.w, H - holeTop);
-
-            // --- Obstacles: the animated koala / pigeon, drawn as FULL frames.
-            // The frames share a canvas, so drawing them untrimmed is what keeps the
-            // creature from sliding around between frames. ---
-            for (const o of obstacles) {
-                const f = obstacleFrameRect(o);
-                const slot = obstacleFrameSlot(o);
-                if (slot && drawSlot(slot, f.x, f.y, f.w, f.h)) continue;
-                ctx.fillStyle = "#2a2a2a"; // placeholder rect on the hitbox itself
-                ctx.fillRect(o.x, o.y, o.w, o.h);
-            }
-
-            // --- Collectibles: drawn rect = pickup hitbox = the visible artwork ---
-            for (const c of collectibles) {
-                const box = collectibleBox(c);
-                if (drawSlot(collectibleSlotName(c.kind), box.x, box.y, box.w, box.h)) continue;
-                if (c.kind === "heart") { drawHeart(c.x, c.y, c.r * 2, "#ff3050"); continue; }
-                // Circle fallback, one color per kind so they stay readable
-                ctx.beginPath();
-                ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-                ctx.fillStyle = c.kind === "jetpack" ? "#30c060" : "#909090";
-                ctx.fill();
-                ctx.beginPath(); // small inner dot for readability
-                ctx.arc(c.x, c.y, c.r * 0.4, 0, Math.PI * 2);
-                ctx.fillStyle = "#f7f7f7";
-                ctx.fill();
-            }
-
-            // --- Player (the death sequence draws its own character instead) ---
-            if (state === "playing") {
-                // Blinking right after losing a heart: he can't be hit during it
-                if (invincibleTimer > 0 && Math.floor(invincibleTimer * 12) % 2 === 0) ctx.globalAlpha = 0.3;
-                drawPlayer();
-                ctx.globalAlpha = 1;
-            }
-
-            // Debug overlay: green boxes = the REAL collision rects of everything
-            // (player, obstacles, collectibles). Obstacles also get their sprite FRAME
-            // outlined in faint blue, so the gap between art and hitbox is visible.
-            // Toggle with DEBUG_HITBOX.
-            if (DEBUG_HITBOX && state === "playing") {
-                drawHitboxDebug(); // player box
-                ctx.lineWidth = 2;
-                for (const o of obstacles) {
-                    const f = obstacleFrameRect(o);
-                    ctx.strokeStyle = "rgba(60,140,255,0.45)";
-                    ctx.strokeRect(f.x, f.y, f.w, f.h);
-                    const hb = obstacleHitbox(o);
-                    ctx.strokeStyle = "#00e050";
-                    ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
-                }
-                ctx.strokeStyle = "#00e050";
-                for (const c of collectibles) { const b = collectibleBox(c); ctx.strokeRect(b.x, b.y, b.w, b.h); }
-            }
-
-            // --- Particles ---
-            for (const p of particles) {
-                ctx.globalAlpha = Math.max(0, p.life / 0.7);
-                ctx.fillStyle = p.color;
-                ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-            }
-            ctx.globalAlpha = 1;
-
-            // --- Floating score popups ---
-            for (const p of popups) {
-                ctx.globalAlpha = Math.max(0, p.life / 0.8);
-                ctx.fillStyle = p.color;
-                ctx.font = "bold 18px monospace";
-                ctx.textAlign = "center";
-                ctx.fillText(p.text, p.x, p.y);
-            }
-            ctx.globalAlpha = 1;
-
-            // --- HUD ---
-            // No backdrop panels; the HUD simply sits away from the screen edges.
-            const hudColor = "#2a2a2a";
-            ctx.fillStyle = hudColor;
-            ctx.font = "bold 30px monospace";
-            ctx.textAlign = "right";
-            ctx.fillText(String(Math.floor(score)).padStart(5, "0"), W - HUD_INSET_X, HUD_INSET_Y + 12);
-            ctx.font = "18px monospace";
-            ctx.fillText("HI " + String(bestScore).padStart(5, "0"), W - HUD_INSET_X, HUD_INSET_Y + 40);
-
-            // Jetpack fuel gauge, top left, and the hearts (lives) right under it
-            drawFuelGauge(HUD_INSET_X, HUD_INSET_Y + 7, hudColor);
-            drawLives(HUD_INSET_X, HUD_INSET_Y + 40);
-
-            // Controls reminder, always visible during the run
-            if (state === "playing") drawControlsHint(H - 34, "#606060"); // it sits on the ground band
-
-            ctx.restore();
-
-            // --- Screen flash (drawn on top, ignores shake) ---
-            if (flashTimer > 0) {
-                ctx.globalAlpha = Math.min(0.5, flashTimer / FLASH_DURATION * 0.5);
-                ctx.fillStyle = flashColor;
-                ctx.fillRect(0, 0, W, H);
-                ctx.globalAlpha = 1;
-            }
-
-            // --- Overlays on top of the (frozen) world ---
-            if (state === "dying") drawDeathSequence();
-
-            // --- Pause overlay (P) on top of everything in the window ---
-            if (paused && state === "playing") drawPauseOverlay();
+            if (state === "boot") drawBoot();
+            else drawHome();
         }
 
         // Draws text in a chunky PIXELATED style: rendered small on an offscreen
@@ -1817,280 +930,13 @@
             ctx.restore();
         }
 
-        // Jetpack icon: two red capsule tanks on a dark backplate, a flared nozzle under
-        // each — and little flames coming out of them while the jetpack actually fires.
-        // Drawn on a 20x20 grid, scaled up, vertically centered on the fuel cells.
-        function drawJetpackIcon(x, y, color) {
-            ctx.save();
-            ctx.translate(x, y - 4);
-            ctx.scale(1.25, 1.25);
-            ctx.fillStyle = color;
-            ctx.fillRect(6, 1, 8, 15);                       // backplate between the tanks
-            ctx.fillStyle = "#e0352b";
-            for (const tx of [0, 12]) {
-                ctx.beginPath();
-                ctx.arc(tx + 4, 3, 4, Math.PI, 0);           // rounded top
-                ctx.lineTo(tx + 8, 13);
-                ctx.arc(tx + 4, 13, 4, 0, Math.PI);          // rounded bottom
-                ctx.closePath();
-                ctx.fill();
-            }
-            ctx.fillStyle = "rgba(255,255,255,0.6)";         // shine on each tank
-            for (const tx of [0, 12]) ctx.fillRect(tx + 1.5, 2, 1.5, 9);
-            ctx.fillStyle = color;                           // flared nozzles
-            for (const tx of [0, 12]) {
-                ctx.beginPath();
-                ctx.moveTo(tx + 2.5, 16);
-                ctx.lineTo(tx + 5.5, 16);
-                ctx.lineTo(tx + 7, 20);
-                ctx.lineTo(tx + 1, 20);
-                ctx.fill();
-            }
-            if (state === "playing" && player.jetting) {
-                ctx.fillStyle = "#ff9a20";
-                for (const tx of [0, 12]) {
-                    ctx.beginPath();
-                    ctx.moveTo(tx + 1, 20);
-                    ctx.lineTo(tx + 7, 20);
-                    ctx.lineTo(tx + 4, 24 + Math.random() * 4);
-                    ctx.fill();
-                }
-            }
-            ctx.restore();
-        }
-
-        // Jetpack fuel gauge: the jetpack icon, then 10 cells that fill bottom-up like
-        // a tank; the color drops green -> amber -> red, and the cells blink when low.
-        function drawFuelGauge(x, y, color) {
-            const SEG = 10, segW = 14, segGap = 3, h = 17;
-            const f = fuel / FUEL_MAX;
-            const blinkOff = f < 0.25 && Math.floor(performance.now() / 180) % 2 === 0;
-            const fillColor = f > 0.5 ? "#30c060" : f > 0.25 ? "#f0a020" : "#ff3020";
-
-            drawJetpackIcon(x, y, color);
-            const gx = x + 33;
-            for (let i = 0; i < SEG; i++) {
-                const sx = gx + i * (segW + segGap);
-                ctx.fillStyle = "rgba(0,0,0,0.15)";
-                ctx.fillRect(sx, y, segW, h);
-                const cell = Math.max(0, Math.min(1, f * SEG - i)); // how full THIS cell is
-                if (cell > 0 && !blinkOff) {
-                    ctx.fillStyle = fillColor;
-                    ctx.fillRect(sx, y + h * (1 - cell), segW, h * cell);
-                }
-            }
-        }
-
-        // A heart centered on (cx, cy), size = its width
-        function drawHeart(cx, cy, size, color) {
-            const s = size / 2;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.moveTo(cx, cy + s * 0.9); // bottom tip
-            ctx.bezierCurveTo(cx - s * 1.2, cy + s * 0.1, cx - s * 0.9, cy - s * 0.9, cx, cy - s * 0.35);
-            ctx.bezierCurveTo(cx + s * 0.9, cy - s * 0.9, cx + s * 1.2, cy + s * 0.1, cx, cy + s * 0.9);
-            ctx.fill();
-        }
-
-        // Lives: one small heart per life left, under the fuel gauge
-        function drawLives(x, y) {
-            for (let i = 0; i < lives; i++) drawHeart(x + 9 + i * 22, y + 8, 18, "#ff3050");
-        }
-
-        // Pause: just the word, nothing else
-        function drawPauseOverlay() {
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "bold 52px monospace";
-            ctx.fillText("PAUSE", W / 2, H / 2 + 18);
-        }
-
-        function drawPlayer() {
-            const px = player.x;
-            const py = player.y;
-
-            drawJetFlame(); // behind the runner
-
-            // --- Sprite path (visuals only — the collision hitbox NEVER changes).
-            // A state whose frame isn't drawn yet (jump, hold...) shows the run frame. ---
-            let name = playerSpriteName();
-            if (!assets[name]) name = runSlot(1);
-            const img = assets[name];
-            if (img) {
-                drawSpriteAnchored(img, name);
-                return;
-            }
-
-            // --- Placeholder path: a plain dark runner, used while a frame is missing ---
-            // Squash is VISUAL ONLY: we scale the drawing around the feet,
-            // the collision hitbox stays exactly PLAYER_W x PLAYER_H.
-            const drawH = PLAYER_H * squash;
-            const drawW = PLAYER_W * (2 - squash); // conserve area: squash down = widen
-            const ox = px + (PLAYER_W - drawW) / 2;
-            const oy = py + (PLAYER_H - drawH);
-
-            ctx.fillStyle = "#2a2a2a";
-            ctx.fillRect(ox, oy, drawW, drawH);
-            ctx.fillStyle = "#f7f7f7"; // eye
-            ctx.fillRect(ox + drawW - 13, oy + 9, 6, 6);
-
-            // Little legs while running on the ground (simple 2-frame animation)
-            if (player.grounded) {
-                const legPhase = Math.floor(worldX / 30) % 2;
-                ctx.fillStyle = "#2a2a2a";
-                if (legPhase === 0) {
-                    ctx.fillRect(ox + 5, GROUND_Y - 5, 7, 5);
-                    ctx.fillRect(ox + drawW - 12, GROUND_Y - 9, 7, 9);
-                } else {
-                    ctx.fillRect(ox + 5, GROUND_Y - 9, 7, 9);
-                    ctx.fillRect(ox + drawW - 12, GROUND_Y - 5, 7, 5);
-                }
-            }
-        }
-
-        // The player's sprite set: the red gummy (gummy_jump, ...)
-        function playerSpritePrefix() {
-            return "gummy";
-        }
-        // The run cycle's frames sit in their own folder, like the portal's: Gummy_run/gummy_run_n
-        function runBase() { return "Gummy_run/" + playerSpritePrefix() + "_run"; }
+        // The gummy's run cycle frames sit in their own folder, like the portal's: Gummy_run/gummy_run_n
+        function runBase() { return "Gummy_run/gummy_run"; }
         function runSlot(n) { return runBase() + "_" + n; }
-
-        // Picks the sprite frame matching the current player state
-        function playerSpriteName() {
-            const pre = playerSpritePrefix();
-            if (!player.grounded) {
-                // Hold frames only show while the jetpack is ACTUALLY firing
-                if (player.jetting) {
-                    const f = Math.floor(runTime * ANIM_FPS) % HOLD_FRAME_COUNT + 1;
-                    return pre + "_hold_" + f;
-                }
-                if (player.jumpsUsed >= 2) return pre + "_doublejump"; // after the 2nd jump
-                return pre + "_jump";                                  // first jump / simple fall
-            }
-            return runSlot(Math.floor(runTime * RUN_FPS) % runFrameCount() + 1); // running on the ground
-        }
 
         // Run frames actually delivered: the loop cycles over what exists (none = placeholder).
         function runFrameCount() {
             return loadedFrames(runBase(), RUN_FRAME_COUNT) || RUN_FRAME_COUNT;
-        }
-
-        // Draws a player sprite at its NATIVE size, centered on the hitbox, its bottom
-        // row on the hitbox's bottom edge (= GROUND_Y when running). squash is the
-        // takeoff / landing juice — visual only, the hitbox never changes.
-        // gummy_hurt (thrown through the air) is anchored on the hitbox CENTER instead.
-        function drawSpriteAnchored(img, name) {
-            const h = img.height * squash;
-            const w = img.width * (2 - squash);
-            const anchorX = player.x + PLAYER_W / 2; // horizontal center of the hitbox
-            if (name && name.endsWith("_hurt")) {
-                const anchorY = player.y + PLAYER_H / 2; // CENTER anchor: he is airborne
-                ctx.drawImage(img, Math.round(anchorX - w / 2), Math.round(anchorY - h / 2), w, h);
-                return;
-            }
-            const anchorY = player.y + PLAYER_H;      // bottom of the hitbox (= ground contact)
-            ctx.drawImage(img, Math.round(anchorX - w / 2), Math.round(anchorY - h), w, h);
-        }
-
-        // Debug: draws the REAL collision box (with its forgiveness padding) over the sprite
-        function drawHitboxDebug() {
-            const hb = playerHitbox();
-            ctx.strokeStyle = "#00e050";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
-        }
-
-        // Jetpack flame: a flickering fire cone blasting down and back from the nozzle
-        function drawJetFlame() {
-            if (!player.jetting) return;
-            const n = jetNozzle();
-            const len = (48 + Math.random() * 26) * Math.min(1, jetPower * 2); // grows on ignition
-            ctx.save();
-            ctx.translate(n.x, n.y);
-            ctx.rotate(Math.PI * 0.72); // pointing down-left, behind the runner
-            const g = ctx.createLinearGradient(0, 0, len, 0);
-            g.addColorStop(0, "rgba(255,245,200,0.95)");
-            g.addColorStop(0.35, "rgba(255,170,40,0.9)");
-            g.addColorStop(1, "rgba(255,60,20,0)");
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.moveTo(0, -11);
-            ctx.quadraticCurveTo(len * 0.5, -9, len, 0);
-            ctx.quadraticCurveTo(len * 0.5, 9, 0, 11);
-            ctx.fill();
-            ctx.fillStyle = "rgba(255,255,255,0.85)"; // white-hot core
-            ctx.beginPath();
-            ctx.moveTo(0, -5);
-            ctx.quadraticCurveTo(len * 0.25, -4, len * 0.45, 0);
-            ctx.quadraticCurveTo(len * 0.25, 4, 0, 5);
-            ctx.fill();
-            ctx.restore();
-        }
-
-        // Jetpack boost: horizontal streaks rushing past faster than the world
-        function drawSpeedLines() {
-            if (state !== "playing" || jetPower < 0.05) return;
-            const span = W + 200;
-            ctx.strokeStyle = `rgba(42,42,42,${0.28 * jetPower})`;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            for (let i = 0; i < 14; i++) {
-                const len = (60 + (i * 37) % 90) * jetPower;
-                const x = span - ((i * 263 + worldX * 1.6) % span) - 100;
-                const y = 40 + (i * 97) % (GROUND_Y - 60);
-                ctx.moveTo(x, y);
-                ctx.lineTo(x + len, y);
-            }
-            ctx.stroke();
-        }
-
-        // Placeholder sky for the run, until its art arrives: soft fluffy clouds
-        // drifting slower than the ground (cheap parallax feel).
-        // Overlapping circles + a flat belly = classic cartoon cloud silhouette.
-        // RULE: nothing overlaps — the clouds are evenly spaced (one per slot, wider
-        // than any cloud) and kept in a sky band ABOVE the highest point a pigeon can
-        // reach (~y 186), so they never touch a bird, a collectible or each other.
-        const CLOUD_COUNT = 4;
-        function drawClouds() {
-            ctx.fillStyle = "rgba(200,200,200,0.65)";
-            const span = W + 240;
-            for (let i = 0; i < CLOUD_COUNT; i++) {
-                const cxp = (W + 160) - ((i * span / CLOUD_COUNT + worldX * 0.35) % span);
-                const cyp = 60 + (i * 47) % 80;   // 60..121: cloud bottoms stay above y ~135
-                const r = 10 + (i % 3) * 4; // size variety between clouds
-                ctx.beginPath();
-                ctx.arc(cxp, cyp, r, 0, Math.PI * 2);
-                ctx.arc(cxp + r * 1.1, cyp - r * 0.75, r * 1.3, 0, Math.PI * 2);
-                ctx.arc(cxp + r * 2.5, cyp - r * 0.55, r * 1.15, 0, Math.PI * 2);
-                ctx.arc(cxp + r * 3.5, cyp, r * 0.95, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillRect(cxp - r * 0.7, cyp - r * 0.15, r * 4.8, r * 1.1); // flat belly
-            }
-        }
-
-        /* =====================================================================
-           RUN BACKDROP — placeholder until the in-game art arrives
-           ===================================================================== */
-
-        function drawRunBackdrop() {
-            // Sky, oversized so a screen shake never uncovers an edge
-            ctx.fillStyle = "#f7f7f7";
-            ctx.fillRect(-20, -20, W + 40, H + 40);
-            drawClouds();
-        }
-
-        // The ground: a flat band under the running line, plus scrolling speed marks
-        function drawRunGround() {
-            ctx.fillStyle = "#e2e2e2";
-            ctx.fillRect(-20, GROUND_Y, W + 40, H - GROUND_Y + 20);
-            ctx.fillStyle = "#2a2a2a";
-            ctx.fillRect(-20, GROUND_Y, W + 40, 3);
-            ctx.fillStyle = "#b5b5b5";
-            for (let i = 0; i < 14; i++) {
-                const mx = ((i * 104) - (worldX % 104));
-                ctx.fillRect(mx, GROUND_Y + 5 + (i % 3) * 4, 17, 2);
-            }
         }
 
         /* =====================================================================
@@ -2104,8 +950,7 @@
         const HOME_SPLASH_T = 0.9;   // how long a koi splash lasts (s)
 
         // --- The living scene. Set up once at load, then animated on the title
-        //     screen AND during the START sequence, so nothing jumps when START is
-        //     pressed. ---
+        //     screen, the gummy's crossings included. ---
         let homeSceneTime = 0;     // the scene's own clock (s)
         let leaves = [];           // {cx, y, w, h, fall, sway, speed, phase, far, slot, size, wait} — cx = center of the sway
         let leafSpawnXs = [];      // where the last leaves came down (center x), newest last
@@ -2596,7 +1441,7 @@
         // The whole title-screen scene, in the PSD's order: the backdrop (with the far
         // and the small leaves inside it, behind the forest / the ledge), the koi, the
         // katana, the samurai, the big leaves (in front of him), the title (it overlaps
-        // none of them). actors() draws the START sequence's portals and gummy last, so
+        // none of them). actors() draws the crossing's portals and gummy last, so
         // the gummy runs in front of the samurai. eyeOpen: see drawHomeSamurai.
         function drawHomeScene(actors, eyeOpen) {
             drawHomeBackdrop();
@@ -2608,48 +1453,10 @@
             if (actors) actors();
         }
 
-        // --- Standing sprites (the koala of the death sequence) ---
-        // fill = how much of its frame height the artwork covers, bottom = the
-        // transparent padding under it: enough to stand it on the ground at a
-        // given character height, whatever its frame looks like.
-        const STANDING_ART = { "koala_running": { fill: 0.979, bottom: 0.021 } };
-
-        // Draws a sprite so that its CHARACTER stands charH tall with its feet on
-        // groundY; flip mirrors it horizontally around its own center.
-        function drawStandingSprite(name, cx, groundY, charH, flip) {
-            const img = assets[name];
-            const a = STANDING_ART[name.replace(/_\d+$/, "")] || { fill: 1, bottom: 0 };
-            if (!img) {
-                // Placeholder block, same footprint as the real character would have
-                const w = charH * 0.55;
-                ctx.fillStyle = "#c03030";
-                ctx.fillRect(cx - w / 2, groundY - charH, w, charH);
-                return false;
-            }
-            const frameH = charH / a.fill;                 // the full frame, padding included
-            const frameW = frameH * (img.width / img.height);
-            const top = groundY - frameH * (1 - a.bottom); // put the ARTWORK's base on groundY
-            if (flip) {
-                ctx.save();
-                ctx.translate(cx, 0);
-                ctx.scale(-1, 1);
-                ctx.drawImage(img, -frameW / 2, top, frameW, frameH);
-                ctx.restore();
-            } else {
-                ctx.drawImage(img, cx - frameW / 2, top, frameW, frameH);
-            }
-            return true;
-        }
-
-        // Picks the current frame of a numbered loop (koala_running_1..2, etc.)
-        function loopFrame(base, count, fps, t) {
-            return base + "_" + (Math.floor(t * fps) % count + 1);
-        }
-
         // The FULL SEND title (title.png, full canvas): already in place at its PSD spot,
-        // bobbing gently (whole pixels)
+        // bobbing gently (whole pixels), on the scene's clock
         function drawHomeTitle() {
-            const bob = Math.sin(performance.now() / 1000 * HOME_LOGO_BOUNCE_SPEED) * HOME_LOGO_BOUNCE_PX;
+            const bob = Math.sin(homeSceneTime * HOME_LOGO_BOUNCE_SPEED) * HOME_LOGO_BOUNCE_PX;
             const dy = HOME_TITLE_SHIFT.y + bob;
             if (!drawNative("title", HOME_TITLE_SHIFT.x, dy)) {
                 drawPixelText("FULL SEND", W / 2 + 5, 240 + dy + 5, 16, 5, MENU_SHADOW);
@@ -2680,7 +1487,7 @@
             ctx.textAlign = "left";
             ctx.font = "bold 46px monospace";
             ctx.fillStyle = "#ffffff";
-            const dots = ".".repeat(Math.floor(performance.now() / 350) % 4);
+            const dots = ".".repeat(Math.floor(bootTime / 0.35) % 4);
             ctx.fillText("LOADING" + dots, W / 2 - ctx.measureText("LOADING").width / 2, H / 2 - 26);
             ctx.font = "bold 22px monospace";
             ctx.fillStyle = "#7fe3ff";
@@ -2704,10 +1511,13 @@
             ctx.fillText(Math.floor(p * 100) + "%", W / 2, by + bh + 34);
         }
 
-        // Title screen. PRESS START only shows up once everything else is in place (see
-        // homeReady), and fades in over HOME_MENU_FADE_T.
+        // Title screen, with the gummy's crossing when one is on. PRESS START only shows
+        // up once everything else is in place (see homeReady), and fades in over
+        // HOME_MENU_FADE_T; after a press it reads NOT AVAILABLE YET for a while,
+        // centered on the same spot.
         function drawHome() {
-            drawHomeScene(null);
+            if (crossingTime >= 0) drawCrossing();
+            else drawHomeScene(null);
 
             if (homeReady()) {
                 const P = HOME_PRESS_START;
@@ -2716,41 +1526,19 @@
                 ctx.textAlign = "left";
                 ctx.textBaseline = "alphabetic";
                 ctx.fillStyle = P.color;
-                ctx.fillText(P.text, P.x, P.y);
+                if (notAvailableTime > 0) {
+                    const cx = P.x + ctx.measureText(P.text).width / 2;
+                    ctx.fillText(NOT_AVAILABLE_TEXT, Math.round(cx - ctx.measureText(NOT_AVAILABLE_TEXT).width / 2), P.y);
+                } else {
+                    ctx.fillText(P.text, P.x, P.y);
+                }
                 ctx.globalAlpha = 1;
             }
         }
 
-        // Draws one keyboard key cap: gray body, darker label for contrast
-        function drawKeyCap(x, y, w, h, label) {
-            ctx.fillStyle = "#909090";                 // key body
-            ctx.fillRect(x, y, w, h);
-            ctx.fillStyle = "#5a5a5a";                 // pressed edge at the bottom
-            ctx.fillRect(x, y + h - 3, w, 3);
-            ctx.fillStyle = "#2e2e2e";                 // label, darker gray/black
-            ctx.font = "bold 12px monospace";
-            ctx.textAlign = "center";
-            ctx.fillText(label, x + w / 2, y + h / 2 + 4);
-        }
-
-        // Controls reminder at the bottom of the run: "JUMP =" + SPACE key cap
-        function drawControlsHint(cy, captionColor) {
-            ctx.globalAlpha = 0.85;
-            ctx.font = "bold 12px monospace";
-            const label = "JUMP =", keyW = 80, gap = 8;
-            const tw = ctx.measureText(label).width;
-            const x = W / 2 - (tw + gap + keyW) / 2; // the pair is centered as one block
-            ctx.fillStyle = captionColor;
-            ctx.textAlign = "left";
-            ctx.fillText(label, x, cy + 14);
-            drawKeyCap(x + tw + gap, cy, keyW, 20, "SPACE");
-            ctx.globalAlpha = 1;
-        }
-
         /* ---------------------------------------------------------------------
-           START SEQUENCE — same forest, the menu gone. A portal opens on the left,
-           the gummy runs out of it, in front of the meditating samurai, into the
-           portal on the right; both close, fade to black, the run starts.
+           THE CROSSING — a portal opens on the left, the gummy runs out of it, in
+           front of the meditating samurai, into the portal on the right; both close.
            The gummy is clipped to the space BETWEEN the two portal centers: that
            is what makes him come out of the first one and vanish into the second.
            --------------------------------------------------------------------- */
@@ -2795,11 +1583,11 @@
             ctx.restore();
         }
 
-        function drawIntro() {
-            const tl = introTimeline();
-            const t = introTime;
+        function drawCrossing() {
+            const tl = crossingTimeline();
+            const t = crossingTime;
             const rt = t - tl.run;                                           // time since the gummy set off
-            const x = PORTAL_LEFT_X - gummyWidth() + INTRO_GUMMY_SPEED * rt; // its left edge
+            const x = PORTAL_LEFT_X - gummyWidth() + CROSSING_GUMMY_SPEED * rt; // its left edge
             const running = t >= tl.run && t < tl.arrive;
             // The samurai opens an eye as the gummy comes in front of him, until the right portal has closed
             const rightClosed = tl.arrive + PORTAL_OPEN_T;
@@ -2820,408 +1608,6 @@
                 }
                 ctx.restore();
             }, peek);
-
-            // Fade to black once both portals have closed
-            if (t >= tl.fade) {
-                ctx.globalAlpha = Math.min(1, (t - tl.fade) / INTRO_FADE_T);
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, W, H);
-                ctx.globalAlpha = 1;
-            }
-        }
-        // Death sequence, in two beats:
-        //
-        //   beat 1  (0 -> DEATH_CATCH_FRAC)
-        //     The runner is already in his player_hurt pose — die() switches him the
-        //     instant the collision lands — and he stays frozen in it. A koala sprints
-        //     in from the LEFT to catch him. The koala artwork faces left by default,
-        //     but here he is running right, so THIS is where the mirror belongs.
-        //
-        //   beat 2  (DEATH_CATCH_FRAC -> 1)
-        //     The koala reaches him: both vanish on the spot, and gameover_player_1..7
-        //     plays through once while GAME OVER drops down the screen.
-        //
-        // The gameover frames share a 1888x1436 canvas, so they are drawn as FULL frames
-        // at one fixed size: no trimming, no jitter between them.
-        function drawDeathSequence() {
-            const p = 1 - deathTimer / DEATH_SEQUENCE_DURATION; // 0 -> 1
-            const elapsed = DEATH_SEQUENCE_DURATION * p;
-
-            // Light veil only
-            ctx.fillStyle = `rgba(10,5,8,${0.35 * p})`;
-            ctx.fillRect(0, 0, W, H);
-
-            // A fall into the void leaves player.y far below the screen, so the feet line
-            // is clamped to the ground: the sequence must stay visible whatever killed us.
-            const cx = player.x + PLAYER_W / 2;
-            const feetY = Math.min(player.y + PLAYER_H, GROUND_Y);
-
-            if (p < DEATH_CATCH_FRAC) {
-                // ---- Beat 1: the runner lies there, the koala closes in from the left ----
-                const kp = p / DEATH_CATCH_FRAC;
-                const kEase = kp * (0.75 + 0.25 * kp);       // steady charge, closing a little faster
-                const koalaX = W * DEATH_KOALA_FROM + (cx - W * DEATH_KOALA_FROM) * kEase;
-                const koalaSlot = loopFrame(obstacleBaseName("ground"), Math.max(1, obstacleFrameCount("ground")), DEATH_KOALA_FPS, elapsed);
-                // Running RIGHT, against the artwork's own facing => mirrored
-                drawStandingSprite(koalaSlot, koalaX, GROUND_Y, DEATH_KOALA_H, true);
-
-                // The runner, thrown and motionless: gummy_hurt hangs off the hitbox
-                // CENTER rather than off the feet.
-                const hurt = assets[playerSpritePrefix() + "_hurt"];
-                if (hurt) {
-                    const h = hurt.height, w = hurt.width;
-                    ctx.drawImage(hurt, cx - w / 2, feetY - PLAYER_H / 2 - h / 2, w, h);
-                } else {
-                    ctx.fillStyle = "#c03030";
-                    ctx.fillRect(cx - PLAYER_W / 2, feetY - PLAYER_H, PLAYER_W, PLAYER_H);
-                }
-                return; // GAME OVER only starts dropping once he has been caught
-            }
-
-            // ---- Beat 2: both are gone, the game-over animation takes over ----
-            const tail = (p - DEATH_CATCH_FRAC) / (1 - DEATH_CATCH_FRAC); // 0 -> 1
-            const tailElapsed = elapsed - DEATH_SEQUENCE_DURATION * DEATH_CATCH_FRAC;
-
-            // Frames 1..7 play through once, then the last one holds
-            const f = Math.min(GAMEOVER_FRAME_COUNT,
-                Math.floor(tailElapsed / GAMEOVER_BEAT_FRAME_T) + 1);
-            const dieImg = assets["gameover_player_" + f];
-            if (dieImg) {
-                // Same fixed height for every frame, anchored on the player's feet line
-                const h = GAMEOVER_FRAME_H, w = h * (dieImg.width / dieImg.height);
-                ctx.drawImage(dieImg, cx - w / 2, feetY - h, w, h);
-            } else {
-                const size = PLAYER_W * (1 + Math.sin(tail * Math.PI * 6) * 0.15);
-                ctx.save();
-                ctx.translate(cx, feetY - PLAYER_H / 2);
-                ctx.rotate(tail * Math.PI * 2);
-                ctx.fillStyle = "#2a2a2a";
-                ctx.fillRect(-size / 2, -size / 2, size, size);
-                ctx.restore();
-            }
-
-            // GAME OVER slides from above down to the center over this second beat
-            const ease = 1 - (1 - tail) * (1 - tail); // settles gently at the end
-            const goY = -80 + ease * (H / 2 + 80);
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#ff3020";
-            ctx.font = "bold 92px monospace";
-            ctx.fillText("GAME OVER", W / 2, goY);
-            ctx.fillStyle = "#f0e0d0";
-            ctx.font = "17px monospace";
-            ctx.fillText("(" + deathCause + ")", W / 2, goY + 44);
-        }
-
-        /* =====================================================================
-           LEADERBOARD (local only — placeholder names + the player's real best)
-           ===================================================================== */
-
-        const DEFAULT_LEADERBOARD = [
-            { name: "D3M0N", score: 6660 },
-            { name: "MOON", score: 4200 },
-            { name: "DGMAX", score: 3333 },
-            { name: "HODL3R", score: 2500 },
-            { name: "W4GMI", score: 1999 },
-            { name: "PEPE404", score: 1337 },
-            { name: "RUGPULL", score: 999 },
-            { name: "TOUCHGRASS", score: 777 },
-            { name: "C0PE", score: 420 },
-            { name: "NGMI", score: 69 }
-        ];
-
-        // Merges the player's saved best score into the fake board (top 10 kept)
-        function getLeaderboardRows() {
-            const rows = DEFAULT_LEADERBOARD.map(r => ({ ...r }));
-            if (bestScore > 0) rows.push({ name: "YOU", score: bestScore, you: true });
-            rows.sort((a, b) => b.score - a.score);
-            return rows.slice(0, 10);
-        }
-
-        function drawLeaderboard() {
-            if (!drawSlot("leaderboard_bg", 0, 0, W, H)) {
-                ctx.fillStyle = "#14090e";
-                ctx.fillRect(0, 0, W, H);
-            }
-
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#ff3020";
-            ctx.font = "bold 40px monospace";
-            ctx.fillText("LEADERBOARD", W / 2, 81);
-
-            // Score of the run that just ended (the flow lands here right after a death)
-            if (score > 0) {
-                ctx.fillStyle = "#f0e0d0";
-                ctx.font = "bold 19px monospace";
-                ctx.fillText("LAST RUN  " + Math.floor(score), W / 2, 115);
-            }
-
-            // 10 rows: rank, name, score (the player's row is highlighted).
-            // Signed-in players with loaded data see the GLOBAL top 10 (@handles);
-            // everyone else keeps the offline lore board — no network dependency.
-            let rows;
-            if (sbUser && onlineTop10 && onlineTop10.length) {
-                const myHandle = sbUser.user_metadata && sbUser.user_metadata.user_name;
-                rows = onlineTop10.map(r => ({ name: "@" + r.handle, score: r.best_score, you: r.handle === myHandle }));
-            } else {
-                rows = getLeaderboardRows();
-            }
-            ctx.font = "23px monospace";
-            for (let i = 0; i < rows.length; i++) {
-                const r = rows[i];
-                const y = 152 + i * 45;
-                ctx.fillStyle = r.you ? "#ffd040" : "#f0e0d0";
-                ctx.textAlign = "left";
-                ctx.fillText(String(i + 1).padStart(2, " ") + ".", 303, y);
-                ctx.fillText(r.name, 378, y);
-                ctx.textAlign = "right";
-                ctx.fillText(String(r.score).padStart(6, " "), 834, y);
-            }
-
-            // Character on the right, picked from the player's rank on the board:
-            // rank 1 -> _4, rank 2 -> _3, ranks 3-4 -> _2, ranks 5-10 -> _1,
-            // not ranked -> the crying leaderboard_player (or its placeholder).
-            const youRank = rows.findIndex(r => r.you) + 1; // 0 = not on the board
-            let tierName = "leaderboard_player";
-            if (youRank === 1) tierName = "leaderboard_player_4";
-            else if (youRank === 2) tierName = "leaderboard_player_3";
-            else if (youRank === 3 || youRank === 4) tierName = "leaderboard_player_2";
-            else if (youRank >= 5) tierName = "leaderboard_player_1";
-
-            const t = performance.now() / 1000;
-            const cx = W * 0.82, cy = 394;
-            const chH = 213, chW = chH * slotAspect(tierName);
-            // Animations by tier: _1 and _3 bob up and down (like the home idle);
-            // _2 and _4 "dance" by mirroring left<->right at least every second.
-            const bobbing = tierName === "leaderboard_player_1" || tierName === "leaderboard_player_3";
-            const dancing = tierName === "leaderboard_player_2" || tierName === "leaderboard_player_4";
-            const bobOff = bobbing ? Math.sin(t * 3) * 7 : 0;
-            const flipped = dancing && Math.floor(t / 1.0) % 2 === 1;
-            ctx.save();
-            if (flipped) { // mirror the drawing around the character's center
-                ctx.translate(cx, 0);
-                ctx.scale(-1, 1);
-                ctx.translate(-cx, 0);
-            }
-            const drawn = drawSlot(tierName, cx - chW / 2, cy - chH / 2 + bobOff, chW, chH);
-            ctx.restore();
-            if (!drawn) {
-                ctx.fillStyle = "#d81f1f";
-                ctx.fillRect(cx - 30, cy - 40, 60, 80);
-                ctx.fillStyle = "#ffe040"; // eye
-                ctx.fillRect(cx + 6, cy - 24, 9, 9);
-                ctx.fillStyle = "#40a0ff"; // falling tears
-                const tearY = (t * 60) % 50;
-                ctx.fillRect(cx + 8, cy - 12 + tearY, 4, 7);
-                ctx.fillRect(cx + 8, cy - 12 + ((tearY + 25) % 50), 3, 5);
-            }
-
-            // Personal position line — and BEFORE login, the hook line that gives the
-            // JOIN button its meaning.
-            {
-                let msg = null;
-                if (sbUser) msg = onlineStatus === "loading" ? "syncing..." : rankMessage();
-                else if (db) msg = "Think you belong in the real Top 10? Log in!";
-                if (msg) {
-                    ctx.textAlign = "center";
-                    ctx.fillStyle = "#ffd040";
-                    ctx.font = "bold 21px monospace";
-                    ctx.fillText(msg, W / 2, 601);
-                }
-            }
-
-            // Buttons: JOIN GLOBAL LEADERBOARD (CTA, hidden once signed in),
-            // SHARE (discreet) and FOLLOW US ON X
-            for (const b of leaderboardButtons()) {
-                const isCta = b.id === "join";
-                ctx.fillStyle = isCta ? "#ff3020" : "rgba(255,255,255,0.08)";
-                ctx.fillRect(b.x, b.y, b.w, b.h);
-                ctx.strokeStyle = isCta ? "#ff3020" : "#909090";
-                ctx.lineWidth = 2;
-                ctx.strokeRect(b.x, b.y, b.w, b.h);
-                ctx.fillStyle = isCta ? "#ffffff" : "#cfcfcf";
-                ctx.font = "bold 14px monospace";
-                ctx.textAlign = "center";
-                ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 5);
-            }
-
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#909090";
-            ctx.font = "14px monospace";
-            ctx.fillText("press to new game", W / 2, H - 12);
-        }
-
-        /* =====================================================================
-           ONLINE LEADERBOARD (Supabase + X login)
-           Entirely optional: if the library failed to load or the network is down,
-           db stays null, every hook below is skipped, and the game runs exactly
-           as before (local best score + lore leaderboard).
-           ===================================================================== */
-
-        const SUPABASE_URL = "https://ljofhdhkjxsqekhzyehz.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqb2ZoZGhranhzcWVraHp5ZWh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTE5MjEsImV4cCI6MjEwNDE4NzkyMX0.yuOmRLLSdgsoyO_F9k1lPc8pzFN-UQnG3g663X5NV80";
-        const SITE_URL = "https://demongotme.com";           // the project website (Check out our website)
-        const GAME_URL = "https://gillesmc.github.io/dgm-runner/"; // link to PLAY the game (used in SHARE posts)
-        const X_FOLLOW_URL = "https://x.com/lovefordemons";  // FOLLOW US ON X target
-
-        let db = null; // Supabase client, or null when running offline
-        try {
-            if (window.supabase) db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        } catch (e) { db = null; }
-
-        let sbUser = null;         // signed-in Supabase user (null = not connected)
-        let onlineTop10 = null;    // [{handle, best_score}] once loaded
-        let onlineRank = null;     // my rank among ranked players
-        let onlineCount = null;    // how many ranked players exist (display rules)
-        let onlineStatus = "idle"; // "idle" | "loading" | "ready" | "error"
-
-        /* ---- The 5 functions below are copied VERBATIM from test-login.html ---- */
-
-        // Creates the player row on first login, updates the handle on later ones
-        async function savePlayer(user) {
-            const { data, error } = await db
-                .from("players")
-                .upsert(
-                    {
-                        user_id: user.id,
-                        x_id: user.user_metadata.provider_id,
-                        handle: user.user_metadata.user_name
-                    },
-                    { onConflict: "x_id" }
-                )
-                .select();
-
-            console.log("savePlayer:", error || data);
-        }
-
-        // Sends a score, but only overwrites the stored best if it's higher
-        async function submitScore(user, score) {
-            const { data, error } = await db
-                .from("players")
-                .update({ best_score: score })
-                .eq("user_id", user.id)
-                .lt("best_score", score)
-                .select();
-
-            console.log("submitScore:", error || data);
-        }
-
-        // Top 10 players by best score
-        async function loadTop10() {
-            const { data, error } = await db
-                .from("players")
-                .select("handle, best_score")
-                .order("best_score", { ascending: false })
-                .limit(10);
-
-            console.log("top10:", error || data);
-            return data;
-        }
-
-        // Personal rank: how many players scored higher, plus one
-        async function loadMyRank(score) {
-            const { count, error } = await db
-                .from("players")
-                .select("*", { count: "exact", head: true })
-                .gt("best_score", score);
-
-            console.log("rank:", error || count + 1);
-            return count + 1;
-        }
-
-        /* ---- End of the verbatim block ---- */
-
-        // How many players have a score on the board at all (for the display rules)
-        async function loadRankedCount() {
-            const { count } = await db
-                .from("players")
-                .select("*", { count: "exact", head: true })
-                .gt("best_score", 0);
-            return count || 0;
-        }
-
-        // Refreshes top 10 + my rank + ranked-player count (never throws)
-        async function refreshOnline() {
-            if (!db || !sbUser) return;
-            onlineStatus = "loading";
-            try {
-                onlineTop10 = await loadTop10();
-                onlineRank = await loadMyRank(bestScore);
-                onlineCount = await loadRankedCount();
-                onlineStatus = "ready";
-            } catch (e) {
-                onlineStatus = "error"; // the lore board keeps being shown instead
-            }
-        }
-
-        // Personal position line. Rules: never show a denominator, and never show a
-        // percentile above 50% (a plain rank is shown instead).
-        function rankMessage() {
-            if (onlineRank == null || onlineCount == null) return null;
-            if (onlineCount < 10) return "Think you belong in the real Top 10?";
-            if (onlineCount < 50) return "RANK #" + onlineRank;
-            const pct = Math.ceil((onlineRank / onlineCount) * 100);
-            if (pct <= 50) return "TOP " + pct + "% OF RANKED PLAYERS";
-            return "RANK #" + onlineRank;
-        }
-
-        // Buttons shown on the leaderboard screen (geometry shared by draw & click).
-        // Each box is as wide as its label + the same padding, every gap is equal and
-        // the whole row is centered — with or without the JOIN button.
-        function leaderboardButtons() {
-            const y = H - 85, h = 34, gap = 16, padX = 22;
-            const btns = [
-                { id: "follow", label: "FOLLOW US ON X" },
-                { id: "website", label: "CHECK OUT OUR WEBSITE" }
-            ];
-            if (!sbUser && db) btns.push({ id: "join", label: "JOIN GLOBAL LEADERBOARD" });
-            btns.push({ id: "share", label: "SHARE" });
-            ctx.font = "bold 14px monospace"; // the font the labels are drawn with
-            for (const b of btns) b.w = Math.ceil(ctx.measureText(b.label).width) + padX * 2;
-            let x = W / 2 - (btns.reduce((sum, b) => sum + b.w, 0) + gap * (btns.length - 1)) / 2;
-            for (const b of btns) { b.x = x; b.y = y; b.h = h; x += b.w + gap; }
-            return btns;
-        }
-
-        function leaderboardButtonAction(id) {
-            if (id === "join" && db) {
-                // Exact same call as the validated test page — redirectTo must stay
-                // origin + pathname or a leftover "#" breaks the session.
-                db.auth.signInWithOAuth({
-                    provider: "x",
-                    options: { redirectTo: window.location.origin + window.location.pathname }
-                });
-            } else if (id === "share") {
-                // Plain text + GAME link web intent — no assets, no generated images
-                const msg = sbUser
-                    ? "Demon Got Me... here is my best score on FULL SEND : " + bestScore + ". Can you do better? " + GAME_URL
-                    : "Demon Got Me... can you do better than me? " + GAME_URL;
-                window.open("https://x.com/intent/post?text=" + encodeURIComponent(msg), "_blank");
-            } else if (id === "follow") {
-                window.open(X_FOLLOW_URL, "_blank");
-            } else if (id === "website") {
-                window.open(SITE_URL, "_blank");
-            }
-        }
-
-        // Runs once per signed-in user: ensure the player row exists, push the local
-        // best (the DB keeps the higher of the two), then load the global board.
-        function handleSignedIn(user) {
-            if (!user || (sbUser && sbUser.id === user.id)) return;
-            sbUser = user;
-            savePlayer(user)
-                .then(() => (bestScore > 0 ? submitScore(user, bestScore) : null))
-                .then(refreshOnline)
-                .catch(() => { });
-        }
-
-        // Restore an existing session on load, and catch the OAuth redirect return
-        if (db) {
-            db.auth.getSession().then(({ data }) => {
-                if (data.session) handleSignedIn(data.session.user);
-            }).catch(() => { });
-            db.auth.onAuthStateChange((_event, session) => {
-                if (session) handleSignedIn(session.user);
-            });
         }
 
         /* =====================================================================
@@ -3247,7 +1633,6 @@
             requestAnimationFrame(loop);
         }
 
-        resetRun();          // so a valid world exists before the first run starts
         initHomeScene();     // the title screen's leaves and koi
         updateDesktopGate(); // decide up front whether this device gets the game at all
         requestAnimationFrame(loop);
