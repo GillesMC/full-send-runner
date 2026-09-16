@@ -46,6 +46,7 @@
             aspect-ratio: 16 / 9;
             display: block;
             position: relative;   /* drawn above #glow */
+            transition: filter 0.8s ease; /* from the LOADING screen's look to the arcade one: same length as BOOT_TO_HOME_T */
             image-rendering: pixelated;
             outline: none;
             /* ARCADE LOOK — brightness, contrast and color punch of the whole picture
@@ -148,6 +149,7 @@
         const H = 720;
         const LOADING_MIN_T = 3.0;         // the LOADING screen stays up at least this long (s)
         const LOADING_MAX_T = 6.0;         // ...and stops waiting for slow images after this (s)
+        const BOOT_TO_HOME_T = 0.8;        // after ENTER: the last LOADING picture fades into the title screen over this (s)
         const LOADING_HOLD_T = 0.25;       // once everything is in, LOADING stays this long before ENTER replaces it (s)
 
         // --- LOADING screen: the frog on its lily pad (assets/loading screen/), through an old CRT ---
@@ -561,6 +563,8 @@
         let bootTime = 0;              // time spent on the LOADING screen (s)
         let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
         let bootReady = false;         // loading is over: ENTER is up, a press goes to the title screen
+        let bootFade = null;           // the last LOADING picture, fading out over the title screen (null once gone)
+        let bootFadeTime = 0;          // how long it has been fading (s)
         let homeMenuTime = 0;          // time since PRESS START appeared (drives its fade-in)
         let pressMessageTime = 0;      // PRESS_MESSAGE_LINES stay up while this is above 0 (s)
         let crossingTime = -1;         // time since the gummy's crossing started (s), -1 = none on screen
@@ -843,21 +847,22 @@
             ramp(blastGain.gain, t, 0.0001, [0.8, t + 0.08], [0.0001, t + 1]);
             play(blast, t, t + 1.05, Math.random()).connect(blastFilter).connect(blastGain).connect(out);
 
-            // The hum while it is open: two saws a little apart through a wobbling low-pass,
-            // with a trembling shimmer of noise on top
+            // The hum while it is open: a soft chord of two sine waves (a fifth apart: no beating,
+            // no engine buzz) drifting slowly in pitch, with a slowly swelling shimmer of noise on top
             const hum = gain(0);
             ramp(hum.gain, t + 0.1, 0.0001, [0.28, t + 0.6]);
             hum.gain.setValueAtTime(0.28, hold);
             hum.gain.exponentialRampToValueAtTime(0.0001, closed);
             hum.connect(out);
-            const humFilter = filter("lowpass", 460, 1.5);
-            humFilter.connect(hum);
-            for (const f of [98, 99.3]) play(osc("sawtooth", f), t, closed + 0.05).connect(humFilter);
-            const wobble = play(osc("sine", 0.7), t, closed + 0.05);
-            wobble.connect(gain(400)).connect(humFilter.detune);
-            const shimmer = noise(), tremble = gain(0.5);
-            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 1400, 4)).connect(tremble).connect(gain(0.1)).connect(hum);
-            play(osc("sine", 11), t, closed + 0.05).connect(gain(0.5)).connect(tremble.gain);
+            const drift = play(osc("sine", 0.4), t, closed + 0.05).connect(gain(10)); // +-10 cents, slowly
+            for (const f of [110, 165]) {
+                const tone = play(osc("sine", f), t, closed + 0.05);
+                drift.connect(tone.detune);
+                tone.connect(gain(0.5)).connect(hum);
+            }
+            const shimmer = noise(), swell = gain(0.7);
+            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 1400, 4)).connect(swell).connect(gain(0.1)).connect(hum);
+            play(osc("sine", 1.5), t, closed + 0.05).connect(gain(0.3)).connect(swell.gain);
 
             // Closing suck, ending as the portal is fully closed...
             const suck = noise(), suckFilter = filter("lowpass", 200, 0.7), suckGain = gain(0);
@@ -876,7 +881,17 @@
            ===================================================================== */
 
         // --- Screen flow helpers ---
-        function goHome() { state = "home"; homeMenuTime = 0; canvas.classList.remove("boot"); }
+        // To the title screen: the LOADING screen as it is now is kept, and faded out over it
+        function goHome() {
+            bootFade = document.createElement("canvas");
+            bootFade.width = W;
+            bootFade.height = H;
+            bootFade.getContext("2d").drawImage(canvas, 0, 0);
+            bootFadeTime = 0;
+            state = "home";
+            homeMenuTime = 0;
+            canvas.classList.remove("boot");
+        }
         // The home screen is "complete" once every image has either loaded or been ruled
         // missing, and its font is in (see homeReady). PRESS START only appears — and only
         // responds — after that, and the theme starts then.
@@ -975,6 +990,7 @@
 
         function update(dt) {
             if (state === "home") updateHomeScene(dt); // the forest keeps living
+            if (bootFade && (bootFadeTime += dt) >= BOOT_TO_HOME_T) bootFade = null;
 
             if (state === "boot") {
                 if (!mix) ensureAudio(); // the sounds start loading now (they stay silent until a click)
@@ -1735,6 +1751,14 @@
                 } else {
                     ctx.fillText(P.text, P.x, P.y);
                 }
+                ctx.globalAlpha = 1;
+            }
+
+            // Just after ENTER: the LOADING screen fading away, gently (eased in and out)
+            if (bootFade) {
+                const p = bootFadeTime / BOOT_TO_HOME_T;
+                ctx.globalAlpha = 1 - p * p * (3 - 2 * p);
+                ctx.drawImage(bootFade, 0, 0);
                 ctx.globalAlpha = 1;
             }
         }
