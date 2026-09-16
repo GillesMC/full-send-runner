@@ -166,12 +166,12 @@
         // the frame as in frames 1..13. Tune by a pixel or two if one still jumps.
         const FROG_FRAME_DY = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3, -5, -4, -5, -9, -8, -6, -10, -5, -6, -2];
         const FROG_POS = { x: 489, y: 158 }; // top-left of the 300x300 frames: the frog lands on the reference's
-        // The frog: contrast, brightness and saturation brought down a touch (1 = as drawn)
-        const FROG_FILTER = "contrast(0.88) brightness(0.94) saturate(0.85)";
+        // The frog: contrast, brightness and saturation (1 = as drawn)
+        const FROG_FILTER = "contrast(0.95) brightness(1.1) saturate(1.25)";
         // Its light bleed: a blurred copy underneath, added as light (so its dark outline casts no
         // shadow): a green glow around the frog, a pink / red one around the lily pad
-        const FROG_GLOW_BLUR = 8;          // px
-        const FROG_GLOW_ALPHA = 0.24;
+        const FROG_GLOW_BLUR = 10;         // px
+        const FROG_GLOW_ALPHA = 0.32;
         // LOADING / ENTER: VT323 drawn small then enlarged pixel for pixel, in a faded blue-grey white
         const BOOT_TEXT_PX = 20;           // the font size it is drawn at...
         const BOOT_TEXT_SCALE = 2;         // ...then enlarged this much (whole pixels): 22px capitals
@@ -183,9 +183,9 @@
         const BOOT_DOT_T = 0.35;           // LOADING's dots come one by one, this often (s); ENTER only
         // replaces it once the third one has been up for as long
         // The screen itself
-        const BOOT_SOFTNESS = 0.6;         // the whole picture, very slightly blurred (px)
+        const BOOT_SOFTNESS = 1;           // the whole picture, slightly blurred (px)
         const BOOT_BLOOM_BLUR = 3;         // bright parts bleeding a little: the picture blurred, added as light (px)...
-        const BOOT_BLOOM_ALPHA = 0.06;     // ...this much
+        const BOOT_BLOOM_ALPHA = 0.1;      // ...this much
         const BOOT_SCANLINE_ALPHA = 0.025; // a barely visible dark line on every 3rd row
         const BOOT_GRAIN_ALPHA = 0.03;     // fine grey grain over EVERYTHING (frog and text included)...
         const BOOT_GRAIN_SPREAD = 64;      // ...each grain pixel within +- this of mid-grey (0..127: lower = softer)
@@ -392,8 +392,7 @@
         // --- Menu ---
         // PRESS START does not start anything yet: a press swaps it for this message,
         // same typeface and color, each line centered where PRESS START is, for PRESS_MESSAGE_T.
-        // The first line sits on PRESS START's baseline, the next ones below it (they may cross
-        // the top of the tancho's leap, y 440: the message is drawn over it).
+        // The block of lines is centered, up and down, on PRESS START's own line.
         const PRESS_MESSAGE_LINES = ["CONGRATS", "YOU'VE FINISHED THE GAME"];
         const PRESS_MESSAGE_FONT = '20px "Press Start 2P"'; // a little smaller than PRESS START (26px)
         const PRESS_MESSAGE_LINE_H = 30;   // baseline to baseline (px): the 20px letters + a 10px gap
@@ -1722,8 +1721,12 @@
                 if (pressMessageTime > 0) {
                     const cx = P.x + ctx.measureText(P.text).width / 2;
                     ctx.font = PRESS_MESSAGE_FONT;
+                    // capitals are as tall as the font size: the middle of PRESS START, then the
+                    // first baseline that puts the middle of the whole block there
+                    const middle = P.y - parseInt(P.font) / 2, px = parseInt(PRESS_MESSAGE_FONT);
+                    const first = Math.round(middle - ((PRESS_MESSAGE_LINES.length - 1) * PRESS_MESSAGE_LINE_H + px) / 2 + px);
                     PRESS_MESSAGE_LINES.forEach((line, i) => {
-                        const y = P.y + i * PRESS_MESSAGE_LINE_H;
+                        const y = first + i * PRESS_MESSAGE_LINE_H;
                         ctx.fillText(line, Math.round(cx - ctx.measureText(line).width / 2), y);
                     });
                 } else {
