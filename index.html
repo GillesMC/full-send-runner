@@ -5,10 +5,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>DGM — Demon Got Me (prototype)</title>
-    <!-- PRESS START on the title screen is set in Press Start 2P -->
+    <!-- PRESS START on the title screen is set in Press Start 2P, LOADING / ENTER in VT323 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=block" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=block" rel="stylesheet">
     <style>
         /* Black page, canvas centered: whatever the window's shape, the space the
            16:9 game doesn't fill shows as black bars */
@@ -51,6 +51,11 @@
             /* ARCADE LOOK — brightness, contrast and color punch of the whole picture
                (1 = untouched). Display only: the art files are not changed. */
             filter: brightness(1.12) contrast(1.08) saturate(1.25);
+        }
+
+        /* The LOADING screen has its own CRT look, drawn in code: no arcade filter on it */
+        #game.boot {
+            filter: none;
         }
 
         /* BACKLIGHT — a tiny live copy of the screen, blown up and blurred behind it:
@@ -123,7 +128,7 @@
     <!-- The game screen (1280x720, the art is drawn on it 1:1) and its backlight -->
     <div id="screen">
         <canvas id="glow" width="160" height="90"></canvas>
-        <canvas id="game" width="1280" height="720"></canvas>
+        <canvas id="game" class="boot" width="1280" height="720"></canvas>
     </div>
 
     <script>
@@ -142,7 +147,34 @@
         const H = 720;
         const LOADING_MIN_T = 1.4;         // the LOADING screen stays up at least this long (s)
         const LOADING_MAX_T = 6.0;         // ...and stops waiting for slow images after this (s)
-        const LOADING_HOLD_T = 0.25;       // "100%" stays on screen this long before the home screen (s)
+        const LOADING_HOLD_T = 0.25;       // once everything is in, LOADING stays this long before ENTER replaces it (s)
+
+        // --- LOADING screen: the frog on its lily pad (assets/loading screen/), through an old CRT ---
+        // Measured on "Loading Screen.png". Once loading is done, ENTER replaces LOADING and
+        // the screen waits for a click (or a key) anywhere: that first press turns the sound on.
+        const BOOT_FONT = '50px "VT323"';  // LOADING / ENTER: 28px capitals, as in the reference
+        const BOOT_TEXT_Y = 490;           // their baseline (px), centered on the screen
+        const BOOT_BG = "#060713";         // navy, darker than the reference's #0e0f1d: the grain and the
+        // bloom below lift it back to it
+        // The frames are Frog_0023_Calque-1 .. Frog_0000_Calque-24: Photoshop numbers the layers
+        // from the top, so Calque-1 is the first frame (sitting, ripples, the fly, the tongue).
+        const FROG_FRAME_COUNT = 24;
+        const FROG_FPS = 12;               // animation speed (frames per second): 24 frames = 2s
+        const FROG_POS = { cx: 640, bottom: 386 }; // each frame is drawn centered on cx, its bottom row on `bottom` (px)
+        // The CRT look, all drawn in code — the frames themselves are never changed:
+        const FROG_SOFT_BLUR = 0.6;        // the frog, very slightly softened (px)...
+        const FROG_CONTRAST = 0.9;         // ...and its digital contrast brought down a touch (1 = as drawn)
+        const FROG_GLOW_BLUR = 6.5;        // its light bleed: a blurred copy underneath (px)...
+        const FROG_GLOW_ALPHA = 0.28;      // ...this opaque
+        const BOOT_TEXT_GLOW_BLUR = 4;     // the text's soft glow (px)...
+        const BOOT_TEXT_GLOW_ALPHA = 0.55; // ...this opaque
+        const BOOT_BLOOM_BLUR = 2;         // screen softness: the picture, blurred, added back over itself (px)...
+        const BOOT_BLOOM_ALPHA = 0.18;     // ...this strong: bright pixels bleed into their neighbours
+        const BOOT_SCANLINE_ALPHA = 0.04;  // a faint dark line on every 3rd row
+        const BOOT_GRAIN_ALPHA = 0.06;     // fine grey grain over EVERYTHING (frog and text included)...
+        const BOOT_GRAIN_HOLD = [1, 2];    // ...jumping to a new random pattern every 1 or 2 frames
+        const BOOT_BG_NOISE = 3;           // background texture: each pixel +- up to this (0..255)
+        const BOOT_VIGNETTE = 0.3;         // how dark the corners get (0 = no vignette)
 
         // --- Title screen: the forest ---
         // Everything comes from "Master Home Screen.psd": each image is named after its
@@ -413,6 +445,8 @@
            without touching the code.
            --------------------------------------------------------------------- */
         const ASSET_SLOTS = [
+            // LOADING screen: the frog (first, so it shows while the rest loads)
+            ...Array.from({ length: FROG_FRAME_COUNT }, (_, i) => frogSlot(i + 1)),
             // Title screen: the forest, named after its PSD layers (see HOME_BACK_LAYERS & co.)
             "sky", "cloud_1", "cloud_2", "cloud_3", "cloud_4", "landscape", "tobi",
             "background", "rocks", "front", "water_mask",
@@ -511,6 +545,7 @@
         let state = "boot";
         let bootTime = 0;              // time spent on the LOADING screen (s)
         let bootDoneTime = 0;          // time spent at 100% on the LOADING screen (s)
+        let bootReady = false;         // loading is over: ENTER is up, a press goes to the title screen
         let homeMenuTime = 0;          // time since PRESS START appeared (drives its fade-in)
         let pressMessageTime = 0;      // PRESS_MESSAGE_LINES stay up while this is above 0 (s)
         let crossingTime = -1;         // time since the gummy's crossing started (s), -1 = none on screen
@@ -538,9 +573,8 @@
            MIX — the music and sounds (assets/Music/)
            Two buses, MUSIC and SFX, into MASTER, then a safety limiter so the sum
            never clips. A missing file just stays silent.
-           Browsers keep all sound off until the first click / key press: a press
-           during the LOADING screen turns it on; otherwise the first press on the
-           title screen does, and only that (the next one is PRESS START).
+           Browsers keep all sound off until the first click / key press: the press on
+           ENTER (at the latest) turns it on, before the title screen and its theme.
            ===================================================================== */
 
         // --- Volumes (0..1): tweak these ---
@@ -602,7 +636,6 @@
         let themeWanted = false;   // the title screen is up: the theme starts as soon as it is loaded
         let themeFadeT0 = 0;       // <audio> mode: when its fade-in started (performance.now, ms)
         let soundUnlocked = false; // a click / key press has turned sound on
-        let pressUnlocksSound = false; // the press being handled only turns sound on: it does not START
 
         function buildMix() {
             if (MIX_ELEMENTS) {
@@ -644,17 +677,12 @@
             return MIX_ELEMENTS ? !!(theme && !theme.paused) : !!(audioCtx && audioCtx.state === "running");
         }
 
-        // Every click / key press, before the game handles it: turns sound on. The very
-        // first one, if it lands on the title screen as a press, does only that.
-        function unlockSound(e) {
+        // Every click / key press, before the game handles it: turns sound on
+        function unlockSound() {
             if (blocked) return;
-            const first = !soundUnlocked, wasOn = soundRunning();
             soundUnlocked = true;
             ensureAudio();
             if (MIX_ELEMENTS && theme && theme.paused) { themeFadeT0 = performance.now(); theme.play().catch(() => { }); }
-            if (!first) return;
-            const press = e.type === "pointerdown" || (e.type === "keydown" && ["Space", "Enter", "ArrowUp"].includes(e.code));
-            pressUnlocksSound = press && state === "home" && !wasOn;
         }
         ["pointerdown", "keydown"].forEach(type => window.addEventListener(type, unlockSound, true));
 
@@ -833,7 +861,7 @@
            ===================================================================== */
 
         // --- Screen flow helpers ---
-        function goHome() { state = "home"; homeMenuTime = 0; }
+        function goHome() { state = "home"; homeMenuTime = 0; canvas.classList.remove("boot"); }
         // The home screen is "complete" once every image has either loaded or been ruled
         // missing, and its font is in (see homeReady). PRESS START only appears — and only
         // responds — after that, and the theme starts then.
@@ -902,12 +930,12 @@
             }
         }
 
-        // Any press (key, click, tap — anywhere) on the title screen: PRESS START is
+        // Any press (key, click, tap — anywhere). On the title screen, PRESS START is
         // not wired to a game yet, so it plays its sound and shows PRESS_MESSAGE_LINES instead
         function pressButton() {
-            if (state !== "home") return; // the LOADING screen can't be skipped
-            // The first press ever, if sound was still off, only turns it on (see unlockSound)
-            if (pressUnlocksSound) { pressUnlocksSound = false; return; }
+            // LOADING screen: nothing until ENTER is up, then any press goes to the title screen
+            // (unlockSound has just turned the sound on)
+            if (state === "boot") { if (bootReady) goHome(); return; }
             if (!homeReady()) return; // PRESS START is not up yet
             if (pressMessageTime > 0) return; // the message is up: PRESS START is back once it is gone
             playSfx("pressStart", MIX_PRESS_START, W / 2);
@@ -936,10 +964,10 @@
             if (state === "boot") {
                 if (!mix) ensureAudio(); // the sounds start loading now (they stay silent until a click)
                 // The LOADING screen waits for the images, with a floor and a ceiling on
-                // how long it stays, then holds "100%" for a beat before the home screen.
+                // how long it stays, then holds a beat before ENTER replaces LOADING.
                 bootTime += dt;
                 if (loadingProgress() >= 1) bootDoneTime += dt;
-                if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) goHome();
+                if (bootDoneTime >= LOADING_HOLD_T || bootTime >= LOADING_MAX_T) bootReady = true;
             } else if (state === "home" && homeReady()) {
                 homeMenuTime += dt; // PRESS START fades in
                 if (!themeWanted) startTheme(); // the title screen is fully up: the theme starts
@@ -1523,46 +1551,115 @@
             return Math.min(1, bootTime / LOADING_MIN_T, assetsSettled / ASSET_SLOTS.length);
         }
 
-        // LOADING screen: web-blue gradient, faint grid, LOADING... / PLEASE WAIT...
-        // and a segmented progress bar following the real asset loading
-        function drawBoot() {
-            const bg = ctx.createLinearGradient(0, 0, 0, H);
-            bg.addColorStop(0, "#00008c");
-            bg.addColorStop(1, "#0000EE");
-            ctx.fillStyle = bg;
-            ctx.fillRect(0, 0, W, H);
-            ctx.fillStyle = "rgba(255,255,255,0.07)"; // graph-paper grid
-            for (let x = 0; x < W; x += 36) ctx.fillRect(x, 0, 1, H);
-            for (let y = 0; y < H; y += 36) ctx.fillRect(0, y, W, 1);
+        // --- LOADING screen (see BOOT_* and FROG_*) ---
+        // The frog's frames, in order (n = 1..FROG_FRAME_COUNT)
+        function frogSlot(n) { return "loading screen/Frog_" + String(FROG_FRAME_COUNT - n).padStart(4, "0") + "_Calque-" + n; }
 
-            const p = loadingProgress();
-            // Optical centering: the WORDS sit on the center line and the dots hang off
-            // to the right (centering "LOADING..." as a whole pushes the word visibly left)
-            ctx.textAlign = "left";
-            ctx.font = "bold 46px monospace";
-            ctx.fillStyle = "#ffffff";
-            const dots = ".".repeat(Math.floor(bootTime / 0.35) % 4);
-            ctx.fillText("LOADING" + dots, W / 2 - ctx.measureText("LOADING").width / 2, H / 2 - 26);
-            ctx.font = "bold 22px monospace";
-            ctx.fillStyle = "#7fe3ff";
-            ctx.fillText("PLEASE WAIT...", W / 2 - ctx.measureText("PLEASE WAIT").width / 2, H / 2 + 14);
+        // VT323 for LOADING / ENTER: the text waits for it (no flash of another font), up to LOADING_MAX_T
+        let bootFontReady = false;
+        if (document.fonts) document.fonts.load(BOOT_FONT, "LOADING ENTER").then(() => { bootFontReady = true; }, () => { bootFontReady = true; });
+        else bootFontReady = true;
+        setTimeout(() => { bootFontReady = true; }, LOADING_MAX_T * 1000);
 
-            // Segmented progress bar
-            const SEG = 24, segW = 14, gap = 4, bh = 18;
-            const bw = SEG * segW + (SEG - 1) * gap;
-            const bx = W / 2 - bw / 2, by = H / 2 + 50;
-            ctx.strokeStyle = "#7fe3ff";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(bx - 6, by - 6, bw + 12, bh + 12);
-            const lit = Math.floor(p * SEG);
-            for (let i = 0; i < SEG; i++) {
-                ctx.fillStyle = i < lit ? "#39ff9e" : "rgba(127,227,255,0.15)";
-                ctx.fillRect(bx + i * (segW + gap), by, segW, bh);
+        // Built once, on first use: the textured background with its vignette, a few grain
+        // patterns, the scanlines, and a scratch canvas for the bloom
+        let bootLayers = null;
+        function buildBootLayers() {
+            const make = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+            // Background: the navy, each pixel nudged a little lighter or darker, then the vignette
+            const bg = make(W, H), bgCtx = bg.getContext("2d");
+            const base = [parseInt(BOOT_BG.slice(1, 3), 16), parseInt(BOOT_BG.slice(3, 5), 16), parseInt(BOOT_BG.slice(5, 7), 16)];
+            const img = bgCtx.createImageData(W, H);
+            for (let i = 0; i < img.data.length; i += 4) {
+                const n = Math.round(rand(-BOOT_BG_NOISE, BOOT_BG_NOISE));
+                img.data[i] = base[0] + n; img.data[i + 1] = base[1] + n; img.data[i + 2] = base[2] + n; img.data[i + 3] = 255;
             }
-            ctx.font = "bold 14px monospace";
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#7fe3ff";
-            ctx.fillText(Math.floor(p * 100) + "%", W / 2, by + bh + 34);
+            bgCtx.putImageData(img, 0, 0);
+            const vignette = bgCtx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, Math.hypot(W, H) / 2);
+            vignette.addColorStop(0, "rgba(0,0,0,0)");
+            vignette.addColorStop(1, "rgba(0,0,0," + BOOT_VIGNETTE + ")");
+            bgCtx.fillStyle = vignette;
+            bgCtx.fillRect(0, 0, W, H);
+            // Grain: patterns of random grey pixels, one picked at random every 1-2 frames
+            const grain = Array.from({ length: 4 }, () => {
+                const c = make(256, 256), g = c.getContext("2d"), d = g.createImageData(256, 256);
+                for (let i = 0; i < d.data.length; i += 4) {
+                    const v = Math.floor(Math.random() * 256);
+                    d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255;
+                }
+                g.putImageData(d, 0, 0);
+                return ctx.createPattern(c, "repeat");
+            });
+            // Scanlines: one dark row out of three
+            const line = make(1, 3), lineCtx = line.getContext("2d");
+            lineCtx.fillStyle = "rgba(0,0,0," + BOOT_SCANLINE_ALPHA + ")";
+            lineCtx.fillRect(0, 2, 1, 1);
+            return { bg, grain, scanlines: ctx.createPattern(line, "repeat"), bloom: make(W, H) };
+        }
+        let grainPick = { pattern: 0, x: 0, y: 0, frames: 0 }; // the grain pattern and offset on screen now
+
+        // The LOADING screen, back to front: background, the frog's light bleed then the frog,
+        // LOADING (or ENTER) with its glow, the bloom over all that, the scanlines, and the grain
+        // on top of everything. ctx.filter (the blurs) is skipped by browsers without it.
+        function drawBoot() {
+            if (!bootLayers) bootLayers = buildBootLayers();
+            const L = bootLayers;
+            ctx.drawImage(L.bg, 0, 0);
+
+            const frame = assets[frogSlot(Math.floor(bootTime * FROG_FPS) % FROG_FRAME_COUNT + 1)];
+            if (frame) {
+                const x = Math.round(FROG_POS.cx - frame.width / 2), y = FROG_POS.bottom - frame.height;
+                ctx.save();
+                ctx.filter = "blur(" + FROG_GLOW_BLUR + "px)";
+                ctx.globalAlpha = FROG_GLOW_ALPHA;
+                ctx.drawImage(frame, x, y);
+                ctx.filter = "blur(" + FROG_SOFT_BLUR + "px) contrast(" + FROG_CONTRAST + ")";
+                ctx.globalAlpha = 1;
+                ctx.drawImage(frame, x, y);
+                ctx.restore();
+            }
+
+            if (bootFontReady) {
+                // LOADING with its dots appearing one by one (the word stays put), then ENTER
+                ctx.save();
+                ctx.font = BOOT_FONT;
+                ctx.textBaseline = "alphabetic";
+                ctx.textAlign = "left";
+                ctx.fillStyle = "#ffffff";
+                const text = bootReady ? "ENTER" : "LOADING " + ".".repeat(Math.floor(bootTime / 0.35) % 4);
+                const tx = Math.round(W / 2 - ctx.measureText(bootReady ? "ENTER" : "LOADING ...").width / 2);
+                ctx.filter = "blur(" + BOOT_TEXT_GLOW_BLUR + "px)";
+                ctx.globalAlpha = BOOT_TEXT_GLOW_ALPHA;
+                ctx.fillText(text, tx, BOOT_TEXT_Y);
+                ctx.filter = "none";
+                ctx.globalAlpha = 1;
+                ctx.fillText(text, tx, BOOT_TEXT_Y);
+                ctx.restore();
+            }
+
+            // Bloom: the whole picture, blurred, added back over itself
+            const bloomCtx = L.bloom.getContext("2d");
+            bloomCtx.clearRect(0, 0, W, H);
+            bloomCtx.drawImage(canvas, 0, 0);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.filter = "blur(" + BOOT_BLOOM_BLUR + "px)";
+            ctx.globalAlpha = BOOT_BLOOM_ALPHA;
+            ctx.drawImage(L.bloom, 0, 0);
+            ctx.restore();
+
+            ctx.fillStyle = L.scanlines;
+            ctx.fillRect(0, 0, W, H);
+
+            // Grain, jumping irregularly: a new random pattern and offset every 1-2 frames
+            if (--grainPick.frames <= 0)
+                grainPick = { pattern: Math.floor(Math.random() * L.grain.length), x: Math.floor(Math.random() * 256), y: Math.floor(Math.random() * 256), frames: Math.round(randIn(BOOT_GRAIN_HOLD)) };
+            ctx.save();
+            ctx.globalAlpha = BOOT_GRAIN_ALPHA;
+            ctx.translate(-grainPick.x, -grainPick.y);
+            ctx.fillStyle = L.grain[grainPick.pattern];
+            ctx.fillRect(0, 0, W + 256, H + 256);
+            ctx.restore();
         }
 
         // Title screen, with the gummy's crossing when one is on. PRESS START only shows
