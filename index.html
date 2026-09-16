@@ -549,7 +549,6 @@
             osc.stop(t + dur);
         }
 
-        const sndWhoosh = () => beep(900, 140, 0.25, "sine");    // the gummy vanishing into it
 
         /* =====================================================================
            MIX — the music and sounds (assets/Music/)
@@ -566,7 +565,8 @@
         const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
         const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
-        const MIX_PORTAL = 0.5;            // a portal's swirl, while it is open (coded: see portalSound)
+        const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
+        const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
         // --- Feel ---
         const MIX_FADE_IN = 2.5;           // the theme fades in when it starts (s), then never stops
         const MIX_VARY_GAIN = [0.85, 1];   // each splash a little louder or softer (x its volume)...
@@ -726,26 +726,47 @@
             src.start(t, Math.max(0, skip || 0));
         }
 
-        // A portal's sound, coded (no file): a rush of air through a band-pass whose pitch
-        // wobbles like the swirl, over a low wobbling hum. It swells up as the portal opens,
-        // holds while it is open, and sinks away as it closes, openFor s after it started
-        // opening. Panned to the portal's side (x, px on screen).
-        const PORTAL_SWIRL_HZ = 2.5;       // how fast the rush wobbles (per s)
+        // A portal's sound, coded (no file), "kawoosh" style: a blast as it opens (a sub boom
+        // dropping away + a burst of noise whose filter slams open), an electric hum rippling
+        // like water while it is open, and a suck as it closes (noise swelling through an
+        // opening filter, cut dead, with a low thunk). openFor = s from the start of its
+        // opening to the start of its closing; x = the portal's spot (px), for the stereo.
         let portalNoise = null;            // 2s of white noise, looped, built on first use
+        let portalReverb = null;           // a synthetic hall (decaying noise), shared by the portals
         function portalSound(x, openFor) {
             if (!audioCtx || audioCtx.state !== "running" || MIX_PORTAL <= 0) return;
-            const t = audioCtx.currentTime, closeAt = t + openFor, end = closeAt + PORTAL_OPEN_T;
+            const t = audioCtx.currentTime;
+            const hold = t + Math.max(openFor, 0.6);   // the hum has swelled up by then
+            const closed = hold + PORTAL_OPEN_T;
             if (!portalNoise) {
                 portalNoise = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
                 const data = portalNoise.getChannelData(0);
                 for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
             }
-            // Swell / hold / fade of the whole sound
-            const out = audioCtx.createGain();
-            out.gain.setValueAtTime(0.0001, t);
-            out.gain.exponentialRampToValueAtTime(MIX_PORTAL, t + PORTAL_OPEN_T);
-            out.gain.setValueAtTime(MIX_PORTAL, closeAt);
-            out.gain.exponentialRampToValueAtTime(0.0001, end);
+            if (!portalReverb) {
+                const len = Math.floor(audioCtx.sampleRate * 2.4);
+                const ir = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
+                for (let ch = 0; ch < 2; ch++) {
+                    const data = ir.getChannelData(ch);
+                    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+                }
+                portalReverb = audioCtx.createConvolver();
+                portalReverb.buffer = ir;
+                portalReverb.connect(sfxOutput());
+            }
+            const gain = (v) => { const g = audioCtx.createGain(); g.gain.value = v; return g; };
+            const osc = (type, f) => { const o = audioCtx.createOscillator(); o.type = type; o.frequency.value = f; return o; };
+            const filter = (type, f, q) => { const b = audioCtx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+            const noise = () => { const n = audioCtx.createBufferSource(); n.buffer = portalNoise; n.loop = true; return n; };
+            const play = (src, from, to, offset) => { src.start(from, offset || 0); src.stop(to); return src; };
+            // param: from `a` at time `at`, then exponential ramps through [value, time] pairs
+            const ramp = (param, at, a, ...steps) => {
+                param.setValueAtTime(a, at);
+                for (const [v, time] of steps) param.exponentialRampToValueAtTime(v, time);
+            };
+
+            // Everything goes through `out` (the volume), panned to the portal's side, with a reverb send
+            const out = gain(MIX_PORTAL);
             let node = out;
             if (audioCtx.createStereoPanner) {
                 const pan = audioCtx.createStereoPanner();
@@ -753,45 +774,45 @@
                 node = node.connect(pan);
             }
             node.connect(sfxOutput());
-            const sources = [];
-            // The rush: noise through a band-pass that rises as it opens, sinks as it
-            // closes, and wobbles up and down all along
-            const noise = audioCtx.createBufferSource();
-            noise.buffer = portalNoise;
-            noise.loop = true;
-            const band = audioCtx.createBiquadFilter();
-            band.type = "bandpass";
-            band.Q.value = 4;
-            band.frequency.setValueAtTime(250, t);
-            band.frequency.exponentialRampToValueAtTime(900, t + PORTAL_OPEN_T);
-            band.frequency.setValueAtTime(900, closeAt);
-            band.frequency.exponentialRampToValueAtTime(200, end);
-            const swirl = audioCtx.createOscillator();
-            swirl.frequency.value = PORTAL_SWIRL_HZ;
-            const swirlDepth = audioCtx.createGain();
-            swirlDepth.gain.value = 500; // cents up and down
-            swirl.connect(swirlDepth).connect(band.detune);
-            const rushGain = audioCtx.createGain();
-            rushGain.gain.value = 3; // a narrow band of noise is quiet: brought up to the hum's level
-            noise.connect(band).connect(rushGain).connect(out);
-            sources.push(noise, swirl);
-            // The hum: two triangles a few Hz apart (they beat), gliding up as it opens
-            for (const f of [70, 74]) {
-                const hum = audioCtx.createOscillator();
-                hum.type = "triangle";
-                hum.frequency.setValueAtTime(f * 0.6, t);
-                hum.frequency.exponentialRampToValueAtTime(f, t + PORTAL_OPEN_T);
-                hum.frequency.setValueAtTime(f, closeAt);
-                hum.frequency.exponentialRampToValueAtTime(f * 0.5, end);
-                const humGain = audioCtx.createGain();
-                humGain.gain.value = 0.08;
-                hum.connect(humGain).connect(out);
-                sources.push(hum);
-            }
-            for (const src of sources) {
-                src.start(t);
-                src.stop(end + 0.05);
-            }
+            out.connect(gain(PORTAL_REVERB)).connect(portalReverb);
+
+            // Opening blast: the sub boom...
+            const boom = osc("sine", 110), boomGain = gain(0);
+            ramp(boom.frequency, t, 110, [32, t + 0.6]);
+            ramp(boomGain.gain, t, 0.0001, [0.9, t + 0.02], [0.0001, t + 0.7]);
+            play(boom, t, t + 0.8).connect(boomGain).connect(out);
+            // ...and the burst of noise
+            const blast = noise(), blastFilter = filter("lowpass", 300, 1.5), blastGain = gain(0);
+            ramp(blastFilter.frequency, t, 300, [7000, t + 0.12], [600, t + 0.9]);
+            ramp(blastGain.gain, t, 0.0001, [0.7, t + 0.04], [0.0001, t + 1]);
+            play(blast, t, t + 1.05, Math.random()).connect(blastFilter).connect(blastGain).connect(out);
+
+            // The hum while it is open: two saws a little apart through a wobbling low-pass,
+            // with a trembling shimmer of noise on top
+            const hum = gain(0);
+            ramp(hum.gain, t + 0.1, 0.0001, [0.28, t + 0.6]);
+            hum.gain.setValueAtTime(0.28, hold);
+            hum.gain.exponentialRampToValueAtTime(0.0001, closed);
+            hum.connect(out);
+            const humFilter = filter("lowpass", 520, 4);
+            humFilter.connect(hum);
+            for (const f of [98, 99.3]) play(osc("sawtooth", f), t, closed + 0.05).connect(humFilter);
+            const wobble = play(osc("sine", 0.7), t, closed + 0.05);
+            wobble.connect(gain(400)).connect(humFilter.detune);
+            const shimmer = noise(), tremble = gain(0.5);
+            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 2800, 6)).connect(tremble).connect(gain(0.18)).connect(hum);
+            play(osc("sine", 11), t, closed + 0.05).connect(gain(0.5)).connect(tremble.gain);
+
+            // Closing suck, ending as the portal is fully closed...
+            const suck = noise(), suckFilter = filter("lowpass", 200, 2), suckGain = gain(0);
+            ramp(suckFilter.frequency, hold, 200, [5000, closed]);
+            ramp(suckGain.gain, hold, 0.0001, [0.45, closed - 0.02], [0.0001, closed + 0.03]);
+            play(suck, hold, closed + 0.05, Math.random()).connect(suckFilter).connect(suckGain).connect(out);
+            // ...and the thunk
+            const thunk = osc("sine", 70), thunkGain = gain(0);
+            ramp(thunk.frequency, closed, 70, [28, closed + 0.3]);
+            ramp(thunkGain.gain, closed, 0.0001, [0.7, closed + 0.01], [0.0001, closed + 0.35]);
+            play(thunk, closed, closed + 0.4).connect(thunkGain).connect(out);
         }
 
         /* =====================================================================
@@ -842,7 +863,6 @@
             crossingTime += dt;
             const tl = crossingTimeline();
             if (before < tl.rightOpen && crossingTime >= tl.rightOpen) portalSound(PORTAL_RIGHT_X, tl.arrive - tl.rightOpen);
-            if (before < tl.arrive && crossingTime >= tl.arrive) sndWhoosh();
             if (crossingTime >= tl.end) {
                 crossingTime = -1;
                 crossingWait = randIn(PORTAL_GAP);
