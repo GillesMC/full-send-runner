@@ -602,9 +602,8 @@
         const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
         const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
-        const MIX_PORTAL = 0.7;            // a portal opening, humming and closing (coded: see portalSound)
-        const PORTAL_REVERB = 0.35;        // how much of the portal goes into its reverb (0 = dry)
-        const PORTAL_CHIMES = 0.12;        // the portal's little bells (its magic touch): 0 = none
+        const MIX_PORTAL = 0.7;            // a portal opening, churning and closing (coded: see portalSound)
+        const PORTAL_REVERB = 0.3;         // how much of the portal goes into its reverb (0 = dry)
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
         const MIX_PRESS_START = 1.0;       // a press on PRESS START
         const MIX_SAMURAI_HM = 1.0;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
@@ -787,17 +786,18 @@
             }
         }
 
-        // A portal's sound, coded (no file), "kawoosh" style: a blast as it opens (a sub boom
-        // dropping away + a burst of noise whose filter slams open), an electric hum rippling
-        // like water while it is open, and a suck as it closes (noise swelling through an
-        // opening filter, cut dead, with a low thunk). openFor = s from the start of its
+        // A portal's sound, coded (no file), in the style of Rick & Morty's portals: gooey and swirly.
+        // Opening: a "vwouRRP" — noise and a low buzz through a filter that swoops open, all through
+        // a phaser (the spinning sweep), with a low "whomp". While open: green liquid churning — a
+        // wobbling hum and bubbling noise through a slow phaser, with bubbles. Closing: a "fwoup",
+        // everything sucked back down, ending in a wet pop. openFor = s from the start of its
         // opening to the start of its closing; x = the portal's spot (px), for the stereo.
         let portalNoise = null;            // 2s of white noise, looped, built on first use
         let portalReverb = null;           // a synthetic hall (decaying noise), shared by the portals
         function portalSound(x, openFor) {
             if (!audioCtx || audioCtx.state !== "running" || MIX_PORTAL <= 0) return;
             const t = audioCtx.currentTime;
-            const hold = t + Math.max(openFor, 0.6);   // the hum has swelled up by then
+            const hold = t + Math.max(openFor, 0.65); // the churning has swelled up by then
             const closed = hold + PORTAL_OPEN_T;
             if (!portalNoise) {
                 portalNoise = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
@@ -825,6 +825,20 @@
                 param.setValueAtTime(a, at);
                 for (const [v, time] of steps) param.exponentialRampToValueAtTime(v, time);
             };
+            // Phaser: a chain of all-pass filters whose frequency sweeps up and down (rate per s,
+            // around `base` Hz, +- depth), mixed with the dry sound. Returns [input, output].
+            const phaser = (from, to, rate, base, depth) => {
+                const input = gain(1), output = gain(1), sweep = play(osc("sine", rate), from, to);
+                let chain = input;
+                for (let i = 0; i < 6; i++) {
+                    const stage = filter("allpass", base, 0.7);
+                    sweep.connect(gain(depth)).connect(stage.frequency);
+                    chain = chain.connect(stage);
+                }
+                input.connect(output);
+                chain.connect(gain(0.9)).connect(output);
+                return [input, output];
+            };
 
             // Everything goes through `out` (the volume), panned to the portal's side, with a reverb send
             const out = gain(MIX_PORTAL);
@@ -837,62 +851,59 @@
             node.connect(sfxOutput());
             out.connect(gain(PORTAL_REVERB)).connect(filter("lowpass", 2200, 0.7)).connect(portalReverb); // a darker hall
 
-            // Opening blast: the sub boom...
-            const boom = osc("sine", 110), boomGain = gain(0);
-            ramp(boom.frequency, t, 110, [32, t + 0.6]);
-            ramp(boomGain.gain, t, 0.0001, [0.9, t + 0.04], [0.0001, t + 0.7]);
-            play(boom, t, t + 0.8).connect(boomGain).connect(out);
-            // ...and the burst of noise
-            const blast = noise(), blastFilter = filter("lowpass", 300, 0.7), blastGain = gain(0);
-            ramp(blastFilter.frequency, t, 300, [2500, t + 0.15], [500, t + 0.9]);
-            ramp(blastGain.gain, t, 0.0001, [0.8, t + 0.08], [0.0001, t + 1]);
-            play(blast, t, t + 1.05, Math.random()).connect(blastFilter).connect(blastGain).connect(out);
+            // Opening "vwouRRP": noise and a low buzz through swooping filters, into a fast phaser...
+            const [openIn, openOut] = phaser(t, t + 1.2, 3.5, 700, 600);
+            openOut.connect(out);
+            const rush = noise(), rushFilter = filter("lowpass", 400, 6), rushGain = gain(0);
+            ramp(rushFilter.frequency, t, 250, [2800, t + 0.18], [500, t + 0.8]);
+            ramp(rushGain.gain, t, 0.0001, [0.5, t + 0.06], [0.0001, t + 0.85]);
+            play(rush, t, t + 1, Math.random()).connect(rushFilter).connect(rushGain).connect(openIn);
+            const buzz = osc("sawtooth", 70), buzzFilter = filter("lowpass", 300, 8), buzzGain = gain(0);
+            ramp(buzz.frequency, t, 45, [95, t + 0.2], [60, t + 0.8]);
+            ramp(buzzFilter.frequency, t, 150, [1400, t + 0.15], [250, t + 0.75]);
+            ramp(buzzGain.gain, t, 0.0001, [0.35, t + 0.05], [0.0001, t + 0.8]);
+            play(buzz, t, t + 0.9).connect(buzzFilter).connect(buzzGain).connect(openIn);
+            // ...and the low "whomp"
+            const whomp = osc("sine", 120), whompGain = gain(0);
+            ramp(whomp.frequency, t, 120, [40, t + 0.45]);
+            ramp(whompGain.gain, t, 0.0001, [0.6, t + 0.03], [0.0001, t + 0.5]);
+            play(whomp, t, t + 0.6).connect(whompGain).connect(out);
 
-            // The hum while it is open: a soft chord of two sine waves (a fifth apart: no beating,
-            // no engine buzz) drifting slowly in pitch, with a slowly swelling shimmer of noise on top
-            const hum = gain(0);
-            ramp(hum.gain, t + 0.1, 0.0001, [0.28, t + 0.6]);
-            hum.gain.setValueAtTime(0.28, hold);
-            hum.gain.exponentialRampToValueAtTime(0.0001, closed);
-            hum.connect(out);
-            const drift = play(osc("sine", 0.4), t, closed + 0.05).connect(gain(10)); // +-10 cents, slowly
-            for (const f of [110, 165]) {
-                const tone = play(osc("sine", f), t, closed + 0.05);
-                drift.connect(tone.detune);
-                tone.connect(gain(0.5)).connect(hum);
-            }
-            const shimmer = noise(), swell = gain(0.7);
-            play(shimmer, t, closed + 0.05, Math.random()).connect(filter("bandpass", 1400, 4)).connect(swell).connect(gain(0.1)).connect(hum);
-            play(osc("sine", 1.5), t, closed + 0.05).connect(gain(0.3)).connect(swell.gain);
-
-            // The magic touch: little bells from A major, the hum's key (it is A and E) — a quick
-            // run up as it opens, a few twinkles at random while it is open, a run down as it closes.
-            // A bell: a sine with a faint note two octaves up, ringing out.
-            const bells = [880, 1108.7, 1318.5, 1760, 2217.5, 2637];
-            const bell = (at, f, v) => {
-                const ring = gain(0);
-                ramp(ring.gain, at, 0.0001, [v, at + 0.005], [0.0001, at + 0.45]);
-                ring.connect(out);
-                play(osc("sine", f), at, at + 0.5).connect(ring);
-                play(osc("sine", f * 4), at, at + 0.5).connect(gain(0.15)).connect(ring);
-            };
-            if (PORTAL_CHIMES > 0) {
-                bells.forEach((f, i) => bell(t + 0.05 + i * 0.06, f, PORTAL_CHIMES));
-                for (let at = t + 0.6; at < hold - 0.1; at += rand(0.15, 0.3))
-                    bell(at, bells[2 + Math.floor(Math.random() * 4)], PORTAL_CHIMES * 0.5);
-                bells.slice().reverse().forEach((f, i) => bell(hold + i * 0.05, f, PORTAL_CHIMES * (1 - i / 8)));
+            // While open: a wobbling hum and bubbling noise through a slow phaser, with bubbles
+            const [loopIn, loopOut] = phaser(t, closed + 0.1, 0.8, 500, 350);
+            loopOut.connect(out);
+            const hum = osc("sawtooth", 55), humFilter = filter("lowpass", 260, 5), humGain = gain(0);
+            play(osc("sine", 4.5), t, closed + 0.1).connect(gain(120)).connect(humFilter.frequency);
+            ramp(humGain.gain, t + 0.2, 0.0001, [0.22, t + 0.6]);
+            humGain.gain.setValueAtTime(0.22, hold);
+            humGain.gain.exponentialRampToValueAtTime(0.0001, closed);
+            play(hum, t, closed + 0.1).connect(humFilter).connect(humGain).connect(loopIn);
+            const churn = noise(), churnFilter = filter("bandpass", 600, 5), churnGain = gain(0);
+            for (let at = t + 0.3; at < hold; at += rand(0.04, 0.08)) churnFilter.frequency.setTargetAtTime(rand(300, 1200), at, 0.015);
+            ramp(churnGain.gain, t + 0.3, 0.0001, [0.12, t + 0.6]);
+            churnGain.gain.setValueAtTime(0.12, hold);
+            churnGain.gain.exponentialRampToValueAtTime(0.0001, closed);
+            play(churn, t, closed + 0.1, Math.random()).connect(churnFilter).connect(churnGain).connect(loopIn);
+            for (let at = t + 0.4; at < hold; at += rand(0.06, 0.25)) {
+                // a bubble: a round tone whose pitch jumps up very fast ("blup")
+                const f = rand(250, 700), bubble = osc("sine", f), bubbleGain = gain(0);
+                ramp(bubble.frequency, at, f, [f * 2.2, at + 0.04]);
+                ramp(bubbleGain.gain, at, 0.0001, [0.06, at + 0.006], [0.0001, at + 0.06]);
+                play(bubble, at, at + 0.08).connect(bubbleGain).connect(out);
             }
 
-            // Closing suck, ending as the portal is fully closed...
-            const suck = noise(), suckFilter = filter("lowpass", 200, 0.7), suckGain = gain(0);
-            ramp(suckFilter.frequency, hold, 200, [1800, closed]);
-            ramp(suckGain.gain, hold, 0.0001, [0.5, closed - 0.03], [0.0001, closed + 0.1]);
-            play(suck, hold, closed + 0.12, Math.random()).connect(suckFilter).connect(suckGain).connect(out);
-            // ...and the thunk
-            const thunk = osc("sine", 70), thunkGain = gain(0);
-            ramp(thunk.frequency, closed, 70, [28, closed + 0.3]);
-            ramp(thunkGain.gain, closed, 0.0001, [0.7, closed + 0.03], [0.0001, closed + 0.35]);
-            play(thunk, closed, closed + 0.4).connect(thunkGain).connect(out);
+            // Closing "fwoup": the noise sucked back down through a fast phaser...
+            const [closeIn, closeOut] = phaser(hold, closed + 0.3, 6, 900, 700);
+            closeOut.connect(out);
+            const suck = noise(), suckFilter = filter("lowpass", 300, 6), suckGain = gain(0);
+            ramp(suckFilter.frequency, hold, 2500, [220, closed]);
+            ramp(suckGain.gain, hold, 0.0001, [0.45, hold + 0.08], [0.0001, closed + 0.05]);
+            play(suck, hold, closed + 0.1, Math.random()).connect(suckFilter).connect(suckGain).connect(closeIn);
+            // ...ending in a wet pop
+            const pop = osc("sine", 180), popGain = gain(0);
+            ramp(pop.frequency, closed - 0.04, 180, [600, closed + 0.02], [150, closed + 0.1]);
+            ramp(popGain.gain, closed - 0.04, 0.0001, [0.35, closed], [0.0001, closed + 0.12]);
+            play(pop, closed - 0.04, closed + 0.15).connect(popGain).connect(out);
         }
 
         /* =====================================================================
