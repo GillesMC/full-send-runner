@@ -835,9 +835,10 @@
            - "geta": a wooden sandal seen from above at a slant (as in assets/geta.cur), its toe up-left; a
              click hurls it: it shoots off spinning hard, smacks into the window's edge (impact star, the
              game shakes), bounces off and falls away, and a new one drops back onto the mouse
+           - "geta-image": the same geta and throw, but the picture assets/geta.png instead of the one drawn in code
            ===================================================================== */
 
-        const CURSOR_STYLE = "geta";       // "hand", "katana", "shuriken", "tomoe", "gauntlet" or "geta"
+        const CURSOR_STYLE = "geta-image"; // "hand", "katana", "shuriken", "tomoe", "gauntlet", "geta" or "geta-image"
         const CURSOR_PIXEL = 2;            // size of one of its pixels on screen (CSS px)
         // --- Hand --- (O outline, W white, S shade; its fingertip points)
         const HAND_SPRITE = [
@@ -975,6 +976,13 @@
         const GETA_GONE_T = 0.25;          // the mouse has no geta this long after a throw (s)...
         const GETA_LIFT = 2;               // ...then a new one drops in from this high (its pixels)...
         const GETA_LIFT_T = 0.07;          // ...landing in this long (s)
+        // --- Geta from a picture ("geta-image"): assets/geta.png, pixel for pixel assets/geta.cur, shown in
+        // CURSOR_PIXEL pixels like the others; it is thrown the same way (GETA_THROW_* and the rest above)
+        const GETA_IMAGE = "assets/geta.png";
+        const GETA_IMAGE_SIZE = 32;        // the picture's size (its pixels)
+        const GETA_IMAGE_HOTSPOT = { x: 5, y: 8 }; // the pointing spot in it: the toe (the .cur's own hotspot)
+        const GETA_FROM_IMAGE = CURSOR_STYLE === "geta-image";
+        const IS_GETA = CURSOR_STYLE === "geta" || GETA_FROM_IMAGE;
 
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
@@ -1047,6 +1055,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
+            : GETA_FROM_IMAGE ? GETA_IMAGE_SIZE + GETA_LIFT
             : CURSOR_STYLE === "geta" ? 20
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
@@ -1231,8 +1240,35 @@
             return [x + GETA_WIDTH / 2 * Math.sin(a), y - GETA_VIEW * GETA_WIDTH / 2 * Math.cos(a)];
         }
 
+        // The geta's picture ("geta-image"), and its afterimage: the same shape, white, every other pixel
+        const getaImage = new Image();
+        const getaGhost = document.createElement("canvas");
+        let getaImageLoaded = false;
+        if (GETA_FROM_IMAGE) {
+            getaImage.onload = () => {
+                getaGhost.width = getaGhost.height = GETA_IMAGE_SIZE;
+                const g = getaGhost.getContext("2d"), dots = document.createElement("canvas");
+                dots.width = dots.height = 2;
+                const d = dots.getContext("2d");
+                d.fillStyle = "#ffffff";
+                d.fillRect(0, 0, 1, 1); d.fillRect(1, 1, 1, 1);
+                g.drawImage(getaImage, 0, 0);
+                g.globalCompositeOperation = "source-in";
+                g.fillStyle = g.createPattern(dots, "repeat");
+                g.fillRect(0, 0, GETA_IMAGE_SIZE, GETA_IMAGE_SIZE);
+                getaImageLoaded = true;
+            };
+            getaImage.src = GETA_IMAGE;
+        }
+
         // The geta on the mouse, `lift` pixels up
         function drawGeta(lift) {
+            if (GETA_FROM_IMAGE) {
+                // the canvas has GETA_LIFT pixels of room above the picture
+                cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+                if (getaImageLoaded) cursorCtx.drawImage(getaImage, 0, GETA_LIFT - lift);
+                return;
+            }
             const [ox, oy] = getaToeMiddle(GETA_TOE.x, GETA_TOE.y - lift);
             paintCursor(getaPixels(CURSOR_SIZE, GETA_ANGLE, ox, oy), GETA_COLORS);
         }
@@ -1269,7 +1305,7 @@
             slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
             slashShown = true; // redraw
         }
-        if (["hand", "gauntlet", "geta"].includes(CURSOR_STYLE)) { slashResize(); window.addEventListener("resize", slashResize); }
+        if (["hand", "gauntlet", "geta", "geta-image"].includes(CURSOR_STYLE)) { slashResize(); window.addEventListener("resize", slashResize); }
         else slashEl.remove();
 
         // A click: a cut through (x, y) (CSS px), at a random slant, either way, curving either way
@@ -1397,7 +1433,12 @@
             // its middle: halfway along it, halfway down its thickness and teeth
             const middle = (ox, oy) => [ox + GETA_LENGTH / 2 * Math.cos(a) + GETA_DEPTH[0] * bottom / 2,
                 oy + GETA_VIEW * GETA_LENGTH / 2 * Math.sin(a) + GETA_DEPTH[1] * bottom / 2];
-            if (!getaThrowFrames) {
+            if (GETA_FROM_IMAGE) {
+                // the picture turns around its center
+                if (!getaImageLoaded) return;
+                getaThrowFrames = { size: GETA_IMAGE_SIZE, frames: null };
+                getaThrowOff = [GETA_IMAGE_SIZE / 2 - GETA_IMAGE_HOTSPOT.x, GETA_IMAGE_SIZE / 2 - GETA_IMAGE_HOTSPOT.y];
+            } else if (!getaThrowFrames) {
                 // big enough for it at any angle
                 const size = 2 * Math.ceil(Math.hypot(GETA_LENGTH, GETA_WIDTH) / 2 + bottom) + 3;
                 getaThrowFrames = { size, frames: [] };
@@ -1454,8 +1495,26 @@
             if (!thrown.length && !impacts.length && !slashShown) return;
             slashCtx.clearRect(0, 0, slashEl.width, slashEl.height);
             slashShown = thrown.length > 0 || impacts.length > 0;
+            if (GETA_FROM_IMAGE) {
+                // the picture (or its afterimage) turned in GETA_THROW_STEPS steps, around its center
+                slashCtx.imageSmoothingEnabled = false;
+                const drawTurned = (pic, x, y, turn) => {
+                    slashCtx.save();
+                    slashCtx.translate(Math.round(x), Math.round(y));
+                    slashCtx.rotate(Math.round(turn * GETA_THROW_STEPS) / GETA_THROW_STEPS * Math.PI * 2);
+                    slashCtx.drawImage(pic, -size / 2, -size / 2);
+                    slashCtx.restore();
+                };
+                for (const g of thrown) {
+                    if (!g.hit) for (const back of GETA_GHOSTS) {
+                        const p = g.trail.find(q => q.t >= g.t - back);
+                        if (p && p.t < g.t) drawTurned(getaGhost, p.x, p.y, p.turn);
+                    }
+                    drawTurned(getaImage, g.x, g.y, g.turn);
+                }
+            }
             const frameAt = (turn) => frames[((Math.round(turn * GETA_THROW_STEPS) % GETA_THROW_STEPS) + GETA_THROW_STEPS) % GETA_THROW_STEPS];
-            for (const g of thrown) {
+            if (!GETA_FROM_IMAGE) for (const g of thrown) {
                 // its afterimages, while it flies: white, every other pixel
                 if (!g.hit) for (const back of GETA_GHOSTS) {
                     const p = g.trail.find(q => q.t >= g.t - back);
@@ -1491,6 +1550,10 @@
         // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's or tomoe's center) on the mouse
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
+            if (GETA_FROM_IMAGE) {
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_IMAGE_HOTSPOT.x * CURSOR_PIXEL) + "px," + Math.round(y - (GETA_LIFT + GETA_IMAGE_HOTSPOT.y) * CURSOR_PIXEL) + "px)";
+                return;
+            }
             if (CURSOR_STYLE === "geta") {
                 cursorEl.style.transform = "translate(" + Math.round(x - GETA_TOE.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TOE.y * CURSOR_PIXEL) + "px)";
                 return;
@@ -1520,7 +1583,7 @@
             cursorClickT = 0;
             if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
             if (CURSOR_STYLE === "gauntlet" && !blocked) dustAt = { x: e.clientX, y: e.clientY };
-            if (CURSOR_STYLE === "geta" && !blocked) throwGeta(e.clientX, e.clientY);
+            if (IS_GETA && !blocked) throwGeta(e.clientX, e.clientY);
         }, true);
         window.addEventListener("pointerup", () => { handDown = false; }, true);
         window.addEventListener("blur", () => { handDown = false; });
@@ -1564,13 +1627,13 @@
                 key = [GAUNTLET_SPRITE, GAUNTLET_COCKED, GAUNTLET_SNAPPED].indexOf(sprite) + "," + width + lit;
                 draw = () => drawGauntlet(sprite, width, lit);
                 dustTick(dt);
-            } else if (CURSOR_STYLE === "geta") {
+            } else if (IS_GETA) {
                 // after a throw: no geta on the mouse, then a new one drops in, then at rest
                 const t = cursorClickT;
                 if (t >= GETA_GONE_T + GETA_LIFT_T) cursorClickT = -1;
                 const gone = cursorClickT >= 0 && t < GETA_GONE_T;
                 const lift = cursorClickT >= 0 && !gone ? Math.round(GETA_LIFT * (1 - (t - GETA_GONE_T) / GETA_LIFT_T)) : 0;
-                key = "geta" + gone + lift;
+                key = "geta" + gone + lift + getaImageLoaded;
                 draw = gone ? () => cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE) : () => drawGeta(lift);
                 getaThrowTick(dt);
             } else if (CURSOR_STYLE === "katana") {
