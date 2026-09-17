@@ -334,6 +334,9 @@
         const HOME_KOI_JUMP_T = 1.5;       // duration of a leap (s)
         const HOME_KOI_LEVEL_AT = 0.4;     // it levels out (head forward) at this share of the leap, and stays level
         const HOME_KOI_JUMP_GAP = [5, 10]; // pause between two leaps (s)
+        // The gummy is drawn over the koi, so a leap waits for his crossing to be past it
+        const HOME_KOI_GUMMY_GAP = 40;     // px kept between the leap and the gummy...
+        const HOME_KOI_GUMMY_WAIT = 0.25;  // ...and if he is in the way, the tancho tries again this soon (s)
         const HOME_KOI_WATER_DROPS = 22;   // droplets riding up with it
         const HOME_KOI_WATER_OFF = [0.45, 0.65]; // they are thrown off between these shares of the leap's height
         const HOME_KOI_WATER_KEEP = [0.3, 0.5];  // ...keeping this share of its speed, before they fall back
@@ -1259,7 +1262,7 @@
             }
 
             // The tancho: waits, then leaps from a random one of HOME_KOI_JUMP_SHIFT, either
-            // way, whatever is around — a splash each way.
+            // way, as long as the gummy will not run in front of it — a splash each way.
             if (koiJump) {
                 const before = koiJump.t;
                 koiJump.t += dt;
@@ -1273,11 +1276,15 @@
             } else if ((koiJumpWait -= dt) <= 0) {
                 const shift = HOME_KOI_JUMP_SHIFT[Math.floor(Math.random() * HOME_KOI_JUMP_SHIFT.length)];
                 const dir = Math.random() < 0.5 ? 1 : -1;
-                koiJump = { t: 0, dir, x0: HOME_KOI_JUMP_CX + shift - dir * HOME_KOI_JUMP_DX / 2 };
-                splashes.push(makeSplash(koiJump.x0, false));
-                playSfx("tanchoJump", MIX_TANCHO_JUMP, koiJump.x0, soundLead("tanchoJump")); // its lead-in skipped: the hit is now
-                tanchoWater = makeTanchoWater();
-                lookTime = -1; // the scene changed (the leaves keep out of its way)
+                const x0 = HOME_KOI_JUMP_CX + shift - dir * HOME_KOI_JUMP_DX / 2;
+                if (!gummyClearOf(x0, dir)) koiJumpWait = HOME_KOI_GUMMY_WAIT; // he is coming: wait and try again
+                else {
+                    koiJump = { t: 0, dir, x0 };
+                    splashes.push(makeSplash(koiJump.x0, false));
+                    playSfx("tanchoJump", MIX_TANCHO_JUMP, koiJump.x0, soundLead("tanchoJump")); // its lead-in skipped: the hit is now
+                    tanchoWater = makeTanchoWater();
+                    lookTime = -1; // the scene changed (the leaves keep out of its way)
+                }
             }
             for (const s of splashes) s.t += dt;
             splashes = splashes.filter(s => s.t < HOME_SPLASH_T);
@@ -1396,6 +1403,24 @@
             ctx.drawImage(img, 0, s, img.width, img.height - s, x, y + s, img.width, img.height - s);
             ctx.drawImage(img, 0, 0, img.width, s, x, y + out, img.width, s);
             if (eyeOpen) drawNative("eye", HOME_EYE.x, HOME_EYE.y + out);
+        }
+
+        // Would the gummy run in front of a leap from x0 going dir, starting now? The gummy is
+        // drawn over the koi, so the leap waits instead (the crossings keep to their own clock).
+        // Both are known ahead: his crossing's clock (or the wait before the next one) and the
+        // leap's own arc, so their two time windows are simply compared.
+        function gummyClearOf(x0, dir) {
+            const start = crossingTime >= 0 ? -crossingTime : crossingWait; // when his crossing starts, from now (s)
+            const tl = crossingTimeline(), gw = gummyWidth();
+            // the leap's x range, the gummy's gap included
+            const w = tanchoSize().w;
+            const left = Math.min(x0, x0 + dir * HOME_KOI_JUMP_DX) - w / 2 - HOME_KOI_GUMMY_GAP;
+            const right = Math.max(x0, x0 + dir * HOME_KOI_JUMP_DX) + w / 2 + HOME_KOI_GUMMY_GAP;
+            // when he is in that range: his left edge runs from PORTAL_LEFT_X - gw at tl.run
+            const from = Math.max(tl.run, tl.run + (left - gw - (PORTAL_LEFT_X - gw)) / CROSSING_GUMMY_SPEED);
+            const to = Math.min(tl.arrive, tl.run + (right - (PORTAL_LEFT_X - gw)) / CROSSING_GUMMY_SPEED);
+            if (to <= from) return true;                       // he never passes there
+            return start + to <= 0 || start + from >= HOME_KOI_JUMP_T; // past already, or not before the leap is over
         }
 
         // A splash where the tancho breaks the water at x: its droplets are drawn once, at
