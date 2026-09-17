@@ -832,8 +832,8 @@
            - "gauntlet": the hand as a golden gauntlet set with six stones; on a click it turns round to
              snap its fingers (cocked, snapped), the stones light up one after the other, a puff of dust
              blows away, and it turns back to pointing
-           - "geta": a wooden sandal seen from above, three-quarters, its toe pointing up-left; on a
-             click it lifts, then clacks down on its teeth
+           - "geta": the picture assets/geta.png (assets/geta.cur as is), its toe up-left; on a click
+             it hops up and back down
            ===================================================================== */
 
         const CURSOR_STYLE = "geta";       // "hand", "katana", "shuriken", "tomoe", "gauntlet" or "geta"
@@ -931,31 +931,13 @@
         const GAUNTLET_COCKED_T = 0.08;    // ...stays cocked this long, then snaps (dust, stones)...
         const GAUNTLET_SNAPPED_T = 0.25;   // ...stays snapped this long, then turns back to pointing
         const GAUNTLET_TURN_THIN = 0.15;   // how thin it gets, mid-turn (x its width)
-        // --- Geta --- built in code as a little 3D block, seen from above at an angle: its board (the
-        // top, then its thickness), two teeth under it, and a V strap on top from a knot near the toe.
-        // Along the board: u, from the toe (0) to the heel; across it: v (+ = the side facing us)
-        const GETA_LENGTH = 18;            // toe to heel (its pixels)
-        const GETA_WIDTH = 8;              // side to side
-        const GETA_CORNER = 1.2;           // how round its corners are
-        const GETA_ANGLE = 30;             // how much it slants down from the toe to the heel (degrees)
-        const GETA_BOARD = 1.4;            // the board's thickness
-        const GETA_TEETH = 3;              // how far the teeth come down under it
-        const GETA_TOOTH = 2.4;            // each tooth's thickness, along the board
-        const GETA_TEETH_AT = [0.27, 0.73]; // where they are along the board (0 = toe .. 1 = heel)
-        const GETA_DEPTH = [-0.3, 1];      // which way "down" goes on screen: how its sides show (per pixel down)
-        const GETA_KNOT = 3;               // the strap's knot, this far from the toe
-        const GETA_STRAP_TO = 0.62;        // the strap's two ends, this far along the board (0..1)...
-        const GETA_STRAP_IN = 0.4;         // ...and this far in from its sides
-        const GETA_STRAP_W = 0.75;         // the strap's half thickness
-        const GETA_KNOT_R = 1.1;           // the knot's radius
-        const GETA_TOE = { x: 4.5, y: 6 }; // the toe (the pointing spot) on the canvas (its pixels)
-        const GETA_COLORS = {
-            outline: "#14151c", top: "#d89a5a", lit: "#f2c07f", side: "#8a5226", tooth: "#5e381b",
-            strap: "#c8283a", knot: "#2a1a10", flick: "#ffffff"
-        };
-        const GETA_LIFT = 2;               // on a click it lifts this high (its pixels)...
-        const GETA_LIFT_T = 0.07;          // ...for this long (s)...
-        const GETA_CLACK_T = 0.12;         // ...then clacks down, a white flick out from each tooth this long
+        // --- Geta --- a picture, not drawn in code: assets/geta.png, pixel for pixel assets/geta.cur,
+        // shown at its own size (1 of its pixels = 1 CSS px)
+        const GETA_IMAGE = "assets/geta.png";
+        const GETA_SIZE = 48;              // the picture's size (px)
+        const GETA_HOTSPOT = { x: 4, y: 10 }; // the pointing spot in it: the toe (the .cur's own hotspot)
+        const GETA_LIFT = 4;               // on a click it hops this high (px)...
+        const GETA_LIFT_T = 0.1;           // ...for this long (s)
 
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
@@ -1028,11 +1010,12 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
-            : CURSOR_STYLE === "geta" ? 27
+            : CURSOR_STYLE === "geta" ? GETA_SIZE + GETA_LIFT
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
-        cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * CURSOR_PIXEL + "px";
+        // (the geta is a picture at its own size: one canvas pixel per CSS px)
+        cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * (CURSOR_STYLE === "geta" ? 1 : CURSOR_PIXEL) + "px";
         let cursorClickT = -1;     // s since the last click, -1 = none going on
         let cursorLast = null;     // the mouse's last spot {x, y}
         let cursorDrawn = null;    // what was drawn last (redrawn only when it changes)
@@ -1169,51 +1152,13 @@
             }
         }
 
-        // The geta, `lift` pixels up; `clack`: with its flicks. Each pixel is traced down from the top
-        // (along GETA_DEPTH): the first part of the geta it meets is what shows there
-        function drawGeta(lift, clack) {
-            const a = GETA_ANGLE * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
-            const half = GETA_WIDTH / 2, bottom = GETA_BOARD + GETA_TEETH;
-            const inBoard = (u, v) => {
-                if (u < 0 || u > GETA_LENGTH || Math.abs(v) > half) return false;
-                const cu = Math.max(GETA_CORNER - u, u - (GETA_LENGTH - GETA_CORNER), 0), cv = Math.max(Math.abs(v) - (half - GETA_CORNER), 0);
-                return Math.hypot(cu, cv) <= GETA_CORNER;
-            };
-            // how far (u, v) is from the strap's arm from the knot to (eu, ev)
-            const knot = [GETA_KNOT, 0], ends = [-1, 1].map(side => [GETA_LENGTH * GETA_STRAP_TO, side * (half - GETA_STRAP_IN)]);
-            const onStrap = (u, v) => ends.some(([eu, ev]) => {
-                const du = eu - knot[0], dv = ev - knot[1], len = Math.hypot(du, dv);
-                const t = ((u - knot[0]) * du + (v - knot[1]) * dv) / (len * len);
-                return t >= 0 && t <= 1 && Math.abs((u - knot[0]) * dv - (v - knot[1]) * du) / len <= GETA_STRAP_W;
-            });
-            // a point of the geta (u, v, depth) on the canvas
-            const toCanvas = (u, v, z) => [GETA_TOE.x + u * cos - v * sin + GETA_DEPTH[0] * z, GETA_TOE.y - lift + u * sin + v * cos + GETA_DEPTH[1] * z];
-            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
-            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
-                let color = null;
-                for (let z = 0; z <= bottom && !color; z += 0.2) {
-                    const sx = x + 0.5 - GETA_TOE.x - GETA_DEPTH[0] * z, sy = y + 0.5 - (GETA_TOE.y - lift) - GETA_DEPTH[1] * z;
-                    const u = sx * cos + sy * sin, v = -sx * sin + sy * cos;
-                    if (z <= GETA_BOARD) {
-                        if (!inBoard(u, v)) continue;
-                        if (z > 0) color = "side";
-                        else if (Math.hypot(u - knot[0], v - knot[1]) <= GETA_KNOT_R) color = "knot";
-                        else if (onStrap(u, v)) color = "strap";
-                        else color = u < 1.2 || v < -half + 1.1 ? "lit" : "top"; // its toe and far edge catch the light
-                    } else if (Math.abs(v) <= half - 0.6 && GETA_TEETH_AT.some(f => Math.abs(u - f * GETA_LENGTH) <= GETA_TOOTH / 2)) color = "tooth";
-                }
-                px[y * CURSOR_SIZE + x] = color;
-            }
-            // the clack: a short flick out from the bottom of each tooth, on the side facing us
-            const flicks = [];
-            if (clack) GETA_TEETH_AT.forEach((f, i) => {
-                const out = i ? 1 : -1;
-                const [bx, by] = toCanvas(f * GETA_LENGTH + out * (GETA_TOOTH / 2 + 1.5), half, bottom);
-                flicks.push([Math.round(bx), Math.round(by)], [Math.round(bx + out), Math.round(by + 1)]);
-            });
-            paintCursor(px, GETA_COLORS);
-            cursorCtx.fillStyle = GETA_COLORS.flick;
-            for (const [fx, fy] of flicks) cursorCtx.fillRect(fx, fy, 1, 1);
+        // The geta's picture, `lift` px up (the canvas has GETA_LIFT px of room above it)
+        const getaImage = new Image();
+        let getaLoaded = false;
+        if (CURSOR_STYLE === "geta") { getaImage.onload = () => { getaLoaded = true; }; getaImage.src = GETA_IMAGE; }
+        function drawGeta(lift) {
+            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+            if (getaLoaded) cursorCtx.drawImage(getaImage, 0, GETA_LIFT - lift);
         }
 
         // The hand, its finger bent down when pressed
@@ -1367,7 +1312,7 @@
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
             if (CURSOR_STYLE === "geta") {
-                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TOE.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TOE.y * CURSOR_PIXEL) + "px)";
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_HOTSPOT.x) + "px," + Math.round(y - GETA_LIFT - GETA_HOTSPOT.y) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") {
@@ -1439,13 +1384,11 @@
                 draw = () => drawGauntlet(sprite, width, lit);
                 dustTick(dt);
             } else if (CURSOR_STYLE === "geta") {
-                // lifted, then clacked down, then at rest
-                const t = cursorClickT;
-                if (t >= GETA_LIFT_T + GETA_CLACK_T) cursorClickT = -1;
-                const lift = cursorClickT >= 0 && t < GETA_LIFT_T ? GETA_LIFT : 0;
-                const clack = cursorClickT >= 0 && t >= GETA_LIFT_T;
-                key = "geta" + lift + clack;
-                draw = () => drawGeta(lift, clack);
+                // a hop: up, then back down
+                if (cursorClickT >= GETA_LIFT_T) cursorClickT = -1;
+                const lift = cursorClickT >= 0 ? GETA_LIFT : 0;
+                key = "geta" + getaLoaded + lift;
+                draw = () => drawGeta(lift);
             } else if (CURSOR_STYLE === "katana") {
                 const end = KATANA_SWING[KATANA_SWING.length - 1][0];
                 const t = cursorClickT, windup = KATANA_SWING[1][0];
