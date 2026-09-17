@@ -160,7 +160,7 @@
         // the grain lifts it back to it
         const BOOT_BG_NOISE = 2;           // background texture: each pixel +- up to this (0..255)
         const BOOT_VIGNETTE = 0.3;         // how dark the corners get (0 = no vignette)
-        // The frames: "from gif/frog_1..24", taken pixel for pixel out of the frog GIF (300x300 each).
+        // The frames: "frog_1..24", taken pixel for pixel out of the frog GIF (300x300 each).
         // How long each one stays up (s), in order; 0 = a single screen refresh, as fast as it goes.
         const FROG_FRAME_T = [...Array(14).fill(0.1), ...Array(10).fill(0)];
         // Frames 14..24 sit too low in the GIF (left over from centering each frame on its own):
@@ -1509,7 +1509,7 @@
 
         // --- LOADING screen (see BOOT_* and FROG_*) ---
         // The frog's frames, in order (n = 1..24)
-        function frogSlot(n) { return "loading screen/from gif/frog_" + n; }
+        function frogSlot(n) { return "loading screen/frog_" + n; }
         let frogFrame = 0;                 // the frame on screen (0-based)
         let frogFrameTime = 0;             // how long it has been up (s)
         // Moves the animation on: a frame of 0s is shown for exactly one screen refresh
