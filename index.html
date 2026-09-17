@@ -74,6 +74,33 @@
             pointer-events: none;
         }
 
+        /* THE MOUSE — a hand, a katana or a shuriken drawn in code (see CURSOR_* in the script). The
+           system arrow is only hidden once the script has it running. */
+        html.custom-cursor,
+        html.custom-cursor * {
+            cursor: none !important;
+        }
+
+        #cursor {
+            position: fixed;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+            image-rendering: pixelated;
+            z-index: 20;          /* above everything, the desktop gate too */
+            display: none;
+        }
+
+        /* The hand's slashes: the whole window, in big pixels (see SLASH_*) */
+        #slash {
+            position: fixed;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+            image-rendering: pixelated;
+            z-index: 19;          /* under the hand */
+        }
+
         /* --- Desktop gate: shown instead of the game on phones and tablets
      (see updateDesktopGate). --- */
         #gate {
@@ -128,6 +155,10 @@
     </div>
 
     <!-- The game screen (1280x720, the art is drawn on it 1:1) and its backlight -->
+    <!-- The mouse: a hand, a katana or a shuriken (see CURSOR_*), and the hand's slashes -->
+    <canvas id="slash"></canvas>
+    <canvas id="cursor"></canvas>
+
     <div id="screen">
         <canvas id="glow" width="160" height="90"></canvas>
         <canvas id="game" class="boot" width="1280" height="720"></canvas>
@@ -788,6 +819,368 @@
                 src.stop(end);
             }
         }
+
+        /* =====================================================================
+           THE MOUSE — a pixel-art cursor in place of the arrow, drawn in code at every
+           angle so it stays crisp as it turns. Three to choose from (CURSOR_STYLE):
+           - "hand": a classic pointing hand; its finger presses on a click, and a click cuts
+             an anime sword slash through that spot
+           - "katana": its tip points; a click swings it in a quick slash, with a white trail
+           - "shuriken": spins a little as the mouse moves (and slows down on its own),
+             a full turn on each click; its center points
+           ===================================================================== */
+
+        const CURSOR_STYLE = "hand";       // "hand", "katana" or "shuriken"
+        const CURSOR_PIXEL = 2;            // size of one of its pixels on screen (CSS px)
+        // --- Hand --- (O outline, W white, S shade; its fingertip points)
+        const HAND_SPRITE = [
+            "....OO......",
+            "...OWWO.....",
+            "...OWWO.....",
+            "...OWWOOO...",
+            "...OWWOWWOO.",
+            "OO.OWWOWWOWO",
+            "OWOOWWWWWWWO",
+            "OWWOWWWWWWSO",
+            ".OWWWWWWWWSO",
+            "..OWWWWWWWSO",
+            "..OWWWWWWSO.",
+            "...OWWWWWSO.",
+            "...OSSSSSSO.",
+            "...OOOOOOOO."
+        ];
+        const HAND_TIP = { x: 5, y: 0 };  // the pointing spot: HAND_SPRITE's grid line it sits on (its pixels)
+        const HAND_FINGER = [3, 6];        // the index finger's columns in HAND_SPRITE
+        const HAND_PRESS = 2;              // on a click, the finger bends down this much (its pixels)...
+        const HAND_PRESS_T = 0.1;          // ...for at least this long (s)
+        const HAND_COLORS = { O: "#14151c", W: "#ffffff", S: "#b9c0c8" };
+        // --- The hand's slash: an anime sword cut, click by click ---
+        // A crescent blade flashes across the spot (drawn in from one end), holds for a beat,
+        // then thins out to nothing; a sparkle bursts where it hit, speed lines streak beside it.
+        const SLASH_LENGTH = 48;           // the crescent, tip to tip (its pixels, CURSOR_PIXEL each)
+        const SLASH_WIDTH = 1.8;             // how thick it is in its middle
+        const SLASH_BULGE = 5;             // how much it curves (0 = straight)
+        const SLASH_ANGLE = [38, 52];      // its slant, picked at random in this range (degrees from level)
+        const SLASH_DRAW_T = 0.035;        // it cuts across in this long (s)...
+        const SLASH_HOLD_T = 0.05;         // ...stays whole this long...
+        const SLASH_FADE_T = 0.14;         // ...then thins out and pulls away toward its end in this long
+        const SLASH_SPARK = [13, 7];       // the sparkle's rays, crossing the cut at 45°: long pair, short pair (its pixels)
+        const SLASH_SPARK_T = 0.12;        // the sparkle shrinks away over this long (s)
+        // Speed lines beside it: [offset across (px, + = its bulge side), from, to (along it, -1..1)]
+        const SLASH_LINES = [[-5, -0.9, 0.2], [6, -0.3, 0.8], [9, 0.2, 0.7]];
+        const SLASH_COLORS = { core: "#ffffff", edge: "#e8313a", ink: "#14151c" }; // edge: "" = none
+        // --- Katana ---
+        const KATANA_BLADE = 13;           // blade length, tip to collar (its pixels)
+        const KATANA_GRIP = 7;             // handle length, guard to pommel
+        const KATANA_GUARD = 2.5;          // how far the guard sticks out on each side
+        const KATANA_HOLD = 4;             // it swings around this point of the handle (from the guard)
+        const KATANA_REST = -135;          // where the tip points at rest (degrees: -135 = up-left)
+        // The slash (degrees away from rest, + = clockwise, s from the click): raised, cuts down
+        // to the left, comes back
+        const KATANA_SWING = [[0, 0], [0.05, 35], [0.14, -70], [0.32, 0]];
+        const KATANA_TRAIL_T = 0.18;       // how long the slash's trail takes to fade (s)
+        const KATANA_COLORS = {
+            outline: "#14151c", edge: "#eef3f6", back: "#9aa4ae", gold: "#d1a23a",
+            guard: "#2b2522", wrap: "#b3262e", wrapDark: "#4a1419", trail: "#ffffff"
+        };
+        // --- Shuriken ---
+        const SHURIKEN_RADIUS = 7;         // from its center to a tip (its pixels)
+        const SHURIKEN_BLADE = 2.4;        // how wide a blade is at its base
+        const SHURIKEN_CORE = 2.8;         // radius of the round body the blades come out of
+        const SHURIKEN_HOLE = 1.1;         // radius of the hole in the middle (0 = none)
+        const SHURIKEN_SPIN_PER_PX = 0.035; // spin speed gained per px the mouse moves (turns/s)
+        const SHURIKEN_SPIN_MAX = 4;       // top spin speed from moving (turns/s)
+        const SHURIKEN_SPIN_DRAG = 3;      // how fast that spin dies down (higher = sooner)
+        const SHURIKEN_CLICK_TURN_T = 0.35; // a click's full turn takes this long (s)
+        const SHURIKEN_ANGLE_STEPS = 64;   // angles it is redrawn at, per turn
+        const SHURIKEN_COLORS = {          // steel, lit on one side of each blade
+            outline: "#14151c", dark: "#59616d", light: "#c9d1d9", core: "#3a404a"
+        };
+
+        const cursorEl = document.getElementById("cursor");
+        const cursorCtx = cursorEl.getContext("2d");
+        const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
+        // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
+        const CURSOR_SIZE = CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
+            ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : SHURIKEN_RADIUS) + 2) + 1;
+        cursorEl.width = cursorEl.height = CURSOR_SIZE;
+        cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * CURSOR_PIXEL + "px";
+        let cursorClickT = -1;     // s since the last click, -1 = none going on
+        let cursorLast = null;     // the mouse's last spot {x, y}
+        let cursorDrawn = null;    // what was drawn last (redrawn only when it changes)
+        let shurikenAngle = 0;     // turns, from moving
+        let shurikenSpin = 0;      // turns/s
+
+        // Paints a pixel map (color names, null = empty) with a 1px outline around it
+        function paintCursor(px, colors) {
+            const at = (x, y) => x >= 0 && x < CURSOR_SIZE && y >= 0 && y < CURSOR_SIZE && px[y * CURSOR_SIZE + x];
+            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                let color = px[y * CURSOR_SIZE + x];
+                if (!color) {
+                    if (!(at(x + 1, y) || at(x - 1, y) || at(x, y + 1) || at(x, y - 1))) continue;
+                    color = "outline";
+                }
+                cursorCtx.fillStyle = colors[color];
+                cursorCtx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        // The shuriken turned `step` angle steps: each pixel is turned back onto the upright
+        // shuriken and colored after what it lands on
+        function drawShuriken(step) {
+            const a = -step / SHURIKEN_ANGLE_STEPS * Math.PI * 2, cos = Math.cos(a), sin = Math.sin(a);
+            const c = (CURSOR_SIZE - 1) / 2;
+            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                const u = (x - c) * cos - (y - c) * sin, v = (x - c) * sin + (y - c) * cos;
+                const r = Math.hypot(u, v);
+                if (r < SHURIKEN_HOLE) continue;
+                const long = Math.max(Math.abs(u), Math.abs(v)), short = Math.min(Math.abs(u), Math.abs(v));
+                const inBlade = long <= SHURIKEN_RADIUS && short <= SHURIKEN_BLADE * (1 - long / SHURIKEN_RADIUS);
+                if (!inBlade && r > SHURIKEN_CORE) continue;
+                // Lit side: the same side of every blade, turning the same way (a pinwheel)
+                const lit = Math.abs(u) >= Math.abs(v) ? (u >= 0) === (v < 0) : (v >= 0) === (u >= 0);
+                px[y * CURSOR_SIZE + x] = r < SHURIKEN_HOLE + 1 ? "core" : lit ? "light" : "dark";
+            }
+            paintCursor(px, SHURIKEN_COLORS);
+        }
+
+        // The katana with its tip `angle` degrees away (0 = right, clockwise), turned around its
+        // swing point (the canvas's center), and the slash's trail: the arc its tip swept from
+        // trailFrom to trailTo (degrees), fading toward trailFrom
+        function drawKatana(angle, trailFrom, trailTo) {
+            const a = angle * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+            const c = (CURSOR_SIZE - 1) / 2;
+            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                // s: along the sword, from its tip toward the pommel; d: across it (+ = its edge side)
+                const s = katanaTipR - ((x - c) * dx + (y - c) * dy);
+                const d = -(x - c) * dy + (y - c) * dx;
+                let color = null;
+                if (s < 0) color = null;
+                else if (s <= KATANA_BLADE) {
+                    // the blade, pointed over its last 2 pixels
+                    if (Math.abs(d) <= 0.85 * Math.min(1, (s + 0.6) / 2.5)) color = d > 0 ? "edge" : "back";
+                } else if (s <= KATANA_BLADE + 1) { if (Math.abs(d) <= 1.1) color = "gold"; }
+                else if (s <= KATANA_BLADE + 2.2) { if (Math.abs(d) <= KATANA_GUARD) color = "guard"; }
+                else if (s <= KATANA_BLADE + 2.2 + KATANA_GRIP) {
+                    // the wrap's crossing pattern
+                    if (Math.abs(d) <= 1.1) color = Math.floor(s + (d > 0 ? 0.5 : 0)) % 2 ? "wrap" : "wrapDark";
+                } else if (s <= KATANA_BLADE + 3.4 + KATANA_GRIP) { if (Math.abs(d) <= 1.1) color = "guard"; }
+                if (!color && trailTo !== trailFrom) {
+                    const r = Math.hypot(x - c, y - c);
+                    let off = Math.atan2(y - c, x - c) * 180 / Math.PI - trailFrom;
+                    off = ((off % 360) + 540) % 360 - 180;
+                    const k = off / (trailTo - trailFrom); // 0 at trailFrom .. 1 at trailTo
+                    // the trail: thin at its fading end, as wide as the blade's last pixels at the tip
+                    if (k >= 0 && k <= 1 && r <= katanaTipR + 0.5 && r >= katanaTipR - 0.5 - 3 * k) color = "trail";
+                }
+                px[y * CURSOR_SIZE + x] = color;
+            }
+            paintCursor(px, KATANA_COLORS);
+        }
+
+        // Where it is in its slash, s after the click: degrees away from rest
+        function katanaSwing(t) {
+            for (let i = 1; i < KATANA_SWING.length; i++) {
+                const [t0, a0] = KATANA_SWING[i - 1], [t1, a1] = KATANA_SWING[i];
+                if (t <= t1) { const k = (t - t0) / (t1 - t0); return a0 + (a1 - a0) * (i === KATANA_SWING.length - 1 ? 1 - Math.pow(1 - k, 2) : k); }
+            }
+            return 0;
+        }
+
+        // The hand, its finger bent down when pressed
+        function drawHand(pressed) {
+            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+            HAND_SPRITE.forEach((row, y) => {
+                for (let x = 0; x < row.length; x++) {
+                    let key = row[x];
+                    if (pressed && y < HAND_SPRITE.length / 2 && x >= HAND_FINGER[0] && x <= HAND_FINGER[1]) {
+                        // the index finger's column, above the knuckles: pulled down
+                        const from = y - HAND_PRESS;
+                        if (from < 0) continue;
+                        key = HAND_SPRITE[from][x];
+                    }
+                    if (key === ".") continue;
+                    cursorCtx.fillStyle = HAND_COLORS[key];
+                    cursorCtx.fillRect(x, y, 1, 1);
+                }
+            });
+        }
+
+        // --- The hand's slash: each one drawn in whole pixels, straight from its shape ---
+        const slashEl = document.getElementById("slash");
+        const slashCtx = slashEl.getContext("2d");
+        const slashes = [];        // the cuts still showing: {x, y (slash pixels), dx, dy, bulge (+-1), t}
+        let slashShown = false;    // something is drawn on it
+        let handDown = false;      // the mouse button is held
+        function slashResize() {
+            slashEl.width = Math.ceil(innerWidth / CURSOR_PIXEL);
+            slashEl.height = Math.ceil(innerHeight / CURSOR_PIXEL);
+            slashEl.style.width = slashEl.width * CURSOR_PIXEL + "px";
+            slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
+            slashShown = true; // redraw
+        }
+        if (CURSOR_STYLE === "hand") { slashResize(); window.addEventListener("resize", slashResize); }
+        else slashEl.remove();
+
+        // A click: a cut through (x, y) (CSS px), at a random slant, either way, curving either way
+        function startSlash(x, y) {
+            const a = randIn(SLASH_ANGLE) * Math.PI / 180 * (Math.random() < 0.5 ? 1 : -1);
+            const dir = Math.random() < 0.5 ? 1 : -1;
+            slashes.push({
+                x: x / CURSOR_PIXEL, y: y / CURSOR_PIXEL, dx: Math.cos(a) * dir, dy: Math.sin(a) * dir,
+                bulge: Math.random() < 0.5 ? 1 : -1, t: 0
+            });
+        }
+
+        // What a slash shows at (u, v) — u along it (+ = the way it cuts), v across it (+ = its
+        // bulge side), both from the click, in pixels: 2 = blade / sparkle, 3 = speed line, 0 = nothing
+        function slashPixel(s, u, v) {
+            const half = SLASH_LENGTH / 2, t = s.t;
+            const fade = Math.max(0, Math.min(1, (t - SLASH_DRAW_T - SLASH_HOLD_T) / SLASH_FADE_T));
+            // the crescent: shown from its back tip up to where the cut has reached; fading, it
+            // thins and its back pulls away toward its front tip
+            const n = u / half;
+            const reach = Math.min(1, t / SLASH_DRAW_T) * 2 - 1, back = -1 + 2 * fade * fade;
+            if (n >= back && n <= reach && Math.abs(n) <= 1) {
+                const shape = 1 - n * n;
+                const mid = SLASH_BULGE * shape - SLASH_BULGE + SLASH_WIDTH / 2; // the click sits in its thick middle
+                const th = SLASH_WIDTH * Math.pow(shape, 0.7) * (1 - fade);
+                if (th > 0.4 && v <= mid && v >= mid - th) return 2;
+            }
+            // the sparkle: two pairs of pointed rays crossing on the click, slanted across the cut
+            const k = 1 - t / SLASH_SPARK_T;
+            if (k > 0) {
+                const [along, across] = SLASH_SPARK;
+                const a = Math.abs(u + v) * Math.SQRT1_2, b = Math.abs(v - u) * Math.SQRT1_2;
+                if (a <= along * k && b <= Math.max(0.5, 1.5 * (1 - a / (along * k)))) return 2;
+                if (b <= across * k && a <= Math.max(0.5, 1.2 * (1 - b / (across * k)))) return 2;
+            }
+            // the speed lines: out with the cut, gone before the blade, pulled toward their front ends
+            const lineK = Math.min(1, t / SLASH_DRAW_T), lineGone = Math.min(1, t / (SLASH_DRAW_T + SLASH_HOLD_T));
+            for (const [off, from, to] of SLASH_LINES) {
+                if (lineGone >= 1 || Math.abs(v - off) > 0.5) continue;
+                const a = from + (to - from) * lineGone, b = from + (to - from) * lineK;
+                if (n >= a && n <= b) return 3;
+            }
+            return 0;
+        }
+
+        function slashTick(dt) {
+            for (let i = slashes.length - 1; i >= 0; i--)
+                if ((slashes[i].t += dt) >= Math.max(SLASH_DRAW_T + SLASH_HOLD_T + SLASH_FADE_T, SLASH_SPARK_T)) slashes.splice(i, 1);
+            if (!slashes.length && !slashShown) return;
+            slashCtx.clearRect(0, 0, slashEl.width, slashEl.height);
+            slashShown = slashes.length > 0;
+            const pad = Math.max(SLASH_LENGTH / 2, SLASH_BULGE + SLASH_WIDTH, ...SLASH_LINES.map(l => Math.abs(l[0]))) + 4;
+            const size = 2 * Math.ceil(pad) + 1;
+            for (const s of slashes) {
+                // its pixels around the click (a mask), then the edge and ink rings around the blade
+                const x0 = Math.round(s.x) - Math.ceil(pad), y0 = Math.round(s.y) - Math.ceil(pad);
+                const side = s.bulge;
+                const mask = new Uint8Array(size * size);
+                for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+                    const px = x0 + i + 0.5 - s.x, py = y0 + j + 0.5 - s.y;
+                    mask[j * size + i] = slashPixel(s, px * s.dx + py * s.dy, (-px * s.dy + py * s.dx) * side);
+                }
+                const ring = (from, value) => {
+                    const hit = (i, j) => i >= 0 && i < size && j >= 0 && j < size && from.includes(mask[j * size + i]);
+                    const add = [];
+                    for (let j = 0; j < size; j++) for (let i = 0; i < size; i++)
+                        if (!mask[j * size + i] && (hit(i + 1, j) || hit(i - 1, j) || hit(i, j + 1) || hit(i, j - 1))) add.push(j * size + i);
+                    for (const at of add) mask[at] = value;
+                };
+                if (SLASH_COLORS.edge) ring([2], 1);
+                if (SLASH_COLORS.ink) ring(SLASH_COLORS.edge ? [1] : [2], 4);
+                const colors = [null, SLASH_COLORS.edge, SLASH_COLORS.core, SLASH_COLORS.core, SLASH_COLORS.ink];
+                for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+                    const m = mask[j * size + i];
+                    if (!m) continue;
+                    slashCtx.fillStyle = colors[m];
+                    slashCtx.fillRect(x0 + i, y0 + j, 1, 1);
+                }
+            }
+        }
+
+        // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's center) on the mouse
+        function placeCursor(x, y) {
+            let ox = 0, oy = 0;
+            if (CURSOR_STYLE === "hand") {
+                cursorEl.style.transform = "translate(" + Math.round(x - HAND_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - HAND_TIP.y * CURSOR_PIXEL) + "px)";
+                return;
+            }
+            if (CURSOR_STYLE === "katana") {
+                const a = KATANA_REST * Math.PI / 180;
+                ox = -Math.cos(a) * katanaTipR * CURSOR_PIXEL;
+                oy = -Math.sin(a) * katanaTipR * CURSOR_PIXEL;
+            }
+            const half = CURSOR_SIZE * CURSOR_PIXEL / 2;
+            cursorEl.style.transform = "translate(" + Math.round(x + ox - half) + "px," + Math.round(y + oy - half) + "px)";
+        }
+
+        window.addEventListener("pointermove", (e) => {
+            if (e.pointerType === "touch") return;
+            if (cursorLast) shurikenSpin = Math.min(SHURIKEN_SPIN_MAX, shurikenSpin + Math.hypot(e.clientX - cursorLast.x, e.clientY - cursorLast.y) * SHURIKEN_SPIN_PER_PX);
+            cursorLast = { x: e.clientX, y: e.clientY };
+            placeCursor(e.clientX, e.clientY);
+            cursorEl.style.display = "block";
+        });
+        window.addEventListener("pointerdown", (e) => {
+            if (e.pointerType === "touch") return;
+            cursorClickT = 0;
+            if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
+        }, true);
+        window.addEventListener("pointerup", () => { handDown = false; }, true);
+        window.addEventListener("blur", () => { handDown = false; });
+        document.documentElement.addEventListener("mouseleave", () => { cursorEl.style.display = "none"; cursorLast = null; });
+
+        // Every frame: moves it on, and redraws it if it changed
+        function cursorTick(dt) {
+            let key, draw;
+            if (cursorClickT >= 0) cursorClickT += dt;
+            if (CURSOR_STYLE === "hand") {
+                if (cursorClickT >= HAND_PRESS_T) cursorClickT = -1;
+                const pressed = handDown || cursorClickT >= 0;
+                key = "hand" + pressed;
+                draw = () => drawHand(pressed);
+                slashTick(dt);
+            } else if (CURSOR_STYLE === "katana") {
+                const end = KATANA_SWING[KATANA_SWING.length - 1][0];
+                const t = cursorClickT, windup = KATANA_SWING[1][0];
+                if (t >= end + KATANA_TRAIL_T) cursorClickT = -1;
+                const angle = Math.round(KATANA_REST + (cursorClickT >= 0 ? katanaSwing(t) : 0));
+                // the trail: from where the cut started, to the tip's furthest point; its start
+                // catches up with its end as it fades
+                let from = 0, to = 0;
+                if (cursorClickT >= windup) {
+                    const peakAt = KATANA_SWING[2][0];
+                    to = Math.round(KATANA_REST + katanaSwing(Math.min(t, peakAt)));
+                    from = KATANA_REST + KATANA_SWING[1][1];
+                    const fade = Math.max(0, (t - peakAt) / (end + KATANA_TRAIL_T - peakAt));
+                    from = Math.round(from + (to - from) * Math.min(1, fade));
+                }
+                key = angle + "," + from + "," + to;
+                draw = () => drawKatana(angle, from, to);
+            } else {
+                shurikenAngle = (shurikenAngle + shurikenSpin * dt) % 1;
+                shurikenSpin *= Math.exp(-SHURIKEN_SPIN_DRAG * dt);
+                let turn = 0;
+                if (cursorClickT >= 0) {
+                    const k = Math.min(1, cursorClickT / SHURIKEN_CLICK_TURN_T);
+                    turn = 1 - Math.pow(1 - k, 3); // fast, then eases into place
+                    if (k >= 1) { cursorClickT = -1; turn = 0; }
+                }
+                const step = Math.round((shurikenAngle + turn) * SHURIKEN_ANGLE_STEPS) % SHURIKEN_ANGLE_STEPS;
+                key = step;
+                draw = () => drawShuriken(step);
+            }
+            if (key !== cursorDrawn) { draw(); cursorDrawn = key; }
+        }
+
+        if (isDesktop()) document.documentElement.classList.add("custom-cursor");
+        cursorTick(0);
 
         /* =====================================================================
            SCREEN FLOW & INPUT — any press on the title screen: Space / Enter / click / tap
@@ -1772,6 +2165,7 @@
             dt = Math.max(0, Math.min(dt, 0.05));
 
             mixTick();
+            cursorTick(dt);
             // Blocked (phone / tablet / tiny window): the world is frozen and nothing is
             // drawn, so coming back to a big enough window resumes exactly where it was.
             if (!blocked) {
