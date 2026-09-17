@@ -822,15 +822,16 @@
 
         /* =====================================================================
            THE MOUSE — a pixel-art cursor in place of the arrow, drawn in code at every
-           angle so it stays crisp as it turns. Three to choose from (CURSOR_STYLE):
+           angle so it stays crisp as it turns. Four to choose from (CURSOR_STYLE):
            - "hand": a classic pointing hand; its finger presses on a click, and a click cuts
              an anime sword slash through that spot
            - "katana": its tip points; a click swings it in a quick slash, with a white trail
            - "shuriken": spins a little as the mouse moves (and slows down on its own),
              a full turn on each click; its center points
+           - "tomoe": the samurai crest, three red commas chasing each other; spins just like the shuriken
            ===================================================================== */
 
-        const CURSOR_STYLE = "shuriken";      // "hand", "katana" or "shuriken"
+        const CURSOR_STYLE = "tomoe";      // "hand", "katana", "shuriken" or "tomoe"
         const CURSOR_PIXEL = 2;            // size of one of its pixels on screen (CSS px)
         // --- Hand --- (O outline, W white, S shade; its fingertip points)
         const HAND_SPRITE = [
@@ -897,18 +898,32 @@
             outline: "#14151c", dark: "#59616d", light: "#c9d1d9", core: "#3a404a"
         };
 
+        // --- Tomoe --- (spins with the SHURIKEN_SPIN_* / SHURIKEN_CLICK_TURN_T / SHURIKEN_ANGLE_STEPS above)
+        // Each comma: a round head, and a tail that trails behind it (against the way it spins),
+        // curving out toward the rim and thinning to a point
+        const TOMOE_RADIUS = 8;            // from its center to the tails' ends (its pixels)
+        const TOMOE_HEAD_AT = 3.6;         // a head's center, from the middle
+        const TOMOE_HEAD = 2.1;            // a head's radius
+        const TOMOE_TAIL_TURN = 115;       // how far round a tail reaches, head to tip (degrees)
+        const TOMOE_TAIL_OUT = 7.4;        // how far out a tail's tip gets, from the middle
+        const TOMOE_TAIL_CURVE = 0.7;      // how soon the tail swings out (lower = sooner)
+        const TOMOE_TAIL_THIN = 1.2;       // how soon it thins out (higher = sooner)
+        const TOMOE_COLORS = {             // lacquer red, lit on each head
+            outline: "#14151c", red: "#c8283a", dark: "#781420", light: "#f07a6e"
+        };
+
         const cursorEl = document.getElementById("cursor");
         const cursorCtx = cursorEl.getContext("2d");
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
-            ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : SHURIKEN_RADIUS) + 2) + 1;
+            ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
         cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * CURSOR_PIXEL + "px";
         let cursorClickT = -1;     // s since the last click, -1 = none going on
         let cursorLast = null;     // the mouse's last spot {x, y}
         let cursorDrawn = null;    // what was drawn last (redrawn only when it changes)
-        let shurikenAngle = 0;     // turns, from moving
+        let shurikenAngle = 0;     // turns, from moving (the shuriken's or the tomoe's)
         let shurikenSpin = 0;      // turns/s
 
         // Paints a pixel map (color names, null = empty) with a 1px outline around it
@@ -944,6 +959,35 @@
                 px[y * CURSOR_SIZE + x] = r < SHURIKEN_HOLE + 1 ? "core" : lit ? "light" : "dark";
             }
             paintCursor(px, SHURIKEN_COLORS);
+        }
+
+        // The tomoe turned `step` angle steps: each pixel is turned back onto the upright tomoe
+        // and tested against each comma, walked from its head to its tail's tip
+        function drawTomoe(step) {
+            const a = -step / SHURIKEN_ANGLE_STEPS * Math.PI * 2, cos = Math.cos(a), sin = Math.sin(a);
+            const c = (CURSOR_SIZE - 1) / 2, SAMPLES = 40;
+            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                const u = (x - c) * cos - (y - c) * sin, v = (x - c) * sin + (y - c) * cos;
+                let color = null;
+                for (let k = 0; k < 3 && !color; k++) {
+                    const head = k * Math.PI * 2 / 3 - Math.PI / 2;
+                    for (let i = 0; i <= SAMPLES && !color; i++) {
+                        const s = i / SAMPLES; // 0 = head .. 1 = tail's tip
+                        const r = TOMOE_HEAD_AT + (TOMOE_TAIL_OUT - TOMOE_HEAD_AT) * Math.pow(s, TOMOE_TAIL_CURVE);
+                        const f = head - TOMOE_TAIL_TURN * Math.PI / 180 * s;
+                        const w = TOMOE_HEAD * Math.pow(1 - s, TOMOE_TAIL_THIN);
+                        const cx = r * Math.cos(f), cy = r * Math.sin(f);
+                        if (Math.hypot(u - cx, v - cy) > Math.max(w, 0.35)) continue;
+                        // a light spot on the head, a darker inner edge along the rest
+                        const spot = s === 0 && Math.hypot(u - cx + 0.8 * Math.cos(head + 0.8), v - cy + 0.8 * Math.sin(head + 0.8)) < TOMOE_HEAD * 0.45;
+                        const inner = (u - cx) * Math.cos(f) + (v - cy) * Math.sin(f) < -w * 0.35;
+                        color = spot ? "light" : inner ? "dark" : "red";
+                    }
+                }
+                px[y * CURSOR_SIZE + x] = color;
+            }
+            paintCursor(px, TOMOE_COLORS);
         }
 
         // The katana with its tip `angle` degrees away (0 = right, clockwise), turned around its
@@ -1104,7 +1148,7 @@
             }
         }
 
-        // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's center) on the mouse
+        // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's or tomoe's center) on the mouse
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
             if (CURSOR_STYLE === "hand") {
@@ -1174,7 +1218,7 @@
                 }
                 const step = Math.round((shurikenAngle + turn) * SHURIKEN_ANGLE_STEPS) % SHURIKEN_ANGLE_STEPS;
                 key = step;
-                draw = () => drawShuriken(step);
+                draw = CURSOR_STYLE === "tomoe" ? () => drawTomoe(step) : () => drawShuriken(step);
             }
             if (key !== cursorDrawn) { draw(); cursorDrawn = key; }
         }
