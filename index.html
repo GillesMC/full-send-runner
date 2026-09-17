@@ -829,8 +829,8 @@
            - "shuriken": spins a little as the mouse moves (and slows down on its own),
              a full turn on each click; its center points
            - "tomoe": the samurai crest, three red commas chasing each other; spins just like the shuriken
-           - "gauntlet": the hand as a golden gauntlet set with six stones; on a click its finger
-             presses, the stones light up one after the other and the snap blows away a puff of dust
+           - "gauntlet": the hand as a golden gauntlet set with six stones; on a click it snaps (a quick
+             twist on its wrist), the stones light up one after the other and a puff of dust blows away
            ===================================================================== */
 
         const CURSOR_STYLE = "gauntlet";   // "hand", "katana", "shuriken", "tomoe" or "gauntlet"
@@ -857,7 +857,7 @@
         const HAND_PRESS = 2;              // on a click, the finger bends down this much (its pixels)...
         const HAND_PRESS_T = 0.1;          // ...for at least this long (s)
         const HAND_COLORS = { O: "#14151c", W: "#ffffff", S: "#b9c0c8" };
-        // --- Gauntlet --- (the hand's shape, its finger presses the same way: HAND_FINGER, HAND_PRESS)
+        // --- Gauntlet --- (the hand's shape: its fingertip is HAND_TIP too)
         // O outline, G gold, L gold lit, D gold in shade; the stones: B space, R reality,
         // P power, E time, A soul (the big one on the back), Y mind
         const GAUNTLET_SPRITE = [
@@ -885,6 +885,10 @@
         const GAUNTLET_STONE_T = 0.05;     // ...one this long after the other (s)...
         const GAUNTLET_STONE_LIT_T = 0.1;  // ...each staying lit (white) this long
         const GAUNTLET_STONE_LIT = "#ffffff";
+        const GAUNTLET_WRIST = { x: 6, y: 13 }; // it twists around this pixel of GAUNTLET_SPRITE
+        // The snap (degrees, + = clockwise, s from the click): cocked back, flicked forward, back to rest
+        const GAUNTLET_SNAP = [[0, 0], [0.07, -18], [0.13, 22], [0.32, 0]];
+        const GAUNTLET_SNAP_AT = 2;        // the dust blows off at this step of GAUNTLET_SNAP (the flick)
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
         const DUST_COUNT = 26;             // grains per click
@@ -955,11 +959,11 @@
         const cursorCtx = cursorEl.getContext("2d");
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
-        // The hand and the gauntlet share the same code, only their pictures differ
-        const HAND_LIKE = CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet";
-        const handSprite = CURSOR_STYLE === "gauntlet" ? GAUNTLET_SPRITE : HAND_SPRITE;
-        const handColors = CURSOR_STYLE === "gauntlet" ? GAUNTLET_COLORS : HAND_COLORS;
-        const CURSOR_SIZE = HAND_LIKE ? Math.max(handSprite.length + HAND_PRESS, handSprite[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
+        // the gauntlet's furthest pixel from its wrist: the room it needs to turn
+        const gauntletReach = Math.max(...[0, GAUNTLET_SPRITE[0].length].flatMap(x => [0, GAUNTLET_SPRITE.length].map(y =>
+            Math.hypot(x - GAUNTLET_WRIST.x, y - GAUNTLET_WRIST.y))));
+        const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? 2 * (Math.ceil(gauntletReach) + 1) + 1
+            : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
         cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * CURSOR_PIXEL + "px";
@@ -1068,29 +1072,54 @@
             paintCursor(px, KATANA_COLORS);
         }
 
-        // Where it is in its slash, s after the click: degrees away from rest
-        function katanaSwing(t) {
-            for (let i = 1; i < KATANA_SWING.length; i++) {
-                const [t0, a0] = KATANA_SWING[i - 1], [t1, a1] = KATANA_SWING[i];
-                if (t <= t1) { const k = (t - t0) / (t1 - t0); return a0 + (a1 - a0) * (i === KATANA_SWING.length - 1 ? 1 - Math.pow(1 - k, 2) : k); }
+        // Where a swing (steps of [s, degrees]) is, s after the click: degrees away from rest
+        function swingAt(steps, t) {
+            for (let i = 1; i < steps.length; i++) {
+                const [t0, a0] = steps[i - 1], [t1, a1] = steps[i];
+                if (t <= t1) { const k = (t - t0) / (t1 - t0); return a0 + (a1 - a0) * (i === steps.length - 1 ? 1 - Math.pow(1 - k, 2) : k); }
             }
             return 0;
         }
+        const katanaSwing = (t) => swingAt(KATANA_SWING, t);
 
-        // The hand (or gauntlet), its finger bent down when pressed; `lit`: the stones shown lit up
-        function drawHand(pressed, lit) {
+        // The gauntlet turned `angle` degrees (clockwise) around its wrist, which sits on the canvas's
+        // center; `lit`: the stones shown lit up. Each pixel is turned back onto the upright sprite
+        // (so at 0 it is exactly the sprite), then the outline is closed where turning opened it
+        function drawGauntlet(angle, lit) {
+            const a = -angle * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+            const c = (CURSOR_SIZE - 1) / 2;
+            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                const sx = Math.round((x - c) * cos - (y - c) * sin) + GAUNTLET_WRIST.x;
+                const sy = Math.round((x - c) * sin + (y - c) * cos) + GAUNTLET_WRIST.y;
+                const key = GAUNTLET_SPRITE[sy] && GAUNTLET_SPRITE[sy][sx];
+                if (key && key !== ".") px[y * CURSOR_SIZE + x] = key;
+            }
+            const inside = (x, y) => x >= 0 && x < CURSOR_SIZE && y >= 0 && y < CURSOR_SIZE && px[y * CURSOR_SIZE + x] && px[y * CURSOR_SIZE + x] !== "O";
             cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
-            handSprite.forEach((row, y) => {
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                let key = px[y * CURSOR_SIZE + x];
+                if (!key && (inside(x + 1, y) || inside(x - 1, y) || inside(x, y + 1) || inside(x, y - 1))) key = "O";
+                if (!key) continue;
+                cursorCtx.fillStyle = lit.includes(key) ? GAUNTLET_STONE_LIT : GAUNTLET_COLORS[key];
+                cursorCtx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        // The hand, its finger bent down when pressed
+        function drawHand(pressed) {
+            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+            HAND_SPRITE.forEach((row, y) => {
                 for (let x = 0; x < row.length; x++) {
                     let key = row[x];
-                    if (pressed && y < handSprite.length / 2 && x >= HAND_FINGER[0] && x <= HAND_FINGER[1]) {
+                    if (pressed && y < HAND_SPRITE.length / 2 && x >= HAND_FINGER[0] && x <= HAND_FINGER[1]) {
                         // the index finger's column, above the knuckles: pulled down
                         const from = y - HAND_PRESS;
                         if (from < 0) continue;
-                        key = handSprite[from][x];
+                        key = HAND_SPRITE[from][x];
                     }
                     if (key === ".") continue;
-                    cursorCtx.fillStyle = lit && lit.includes(key) ? GAUNTLET_STONE_LIT : handColors[key];
+                    cursorCtx.fillStyle = HAND_COLORS[key];
                     cursorCtx.fillRect(x, y, 1, 1);
                 }
             });
@@ -1109,7 +1138,7 @@
             slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
             slashShown = true; // redraw
         }
-        if (HAND_LIKE) { slashResize(); window.addEventListener("resize", slashResize); }
+        if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") { slashResize(); window.addEventListener("resize", slashResize); }
         else slashEl.remove();
 
         // A click: a cut through (x, y) (CSS px), at a random slant, either way, curving either way
@@ -1194,6 +1223,7 @@
         // --- The gauntlet's dust ---
         const dust = [];           // the grains still flying: {x, y (slash pixels), vx, vy, t, life, color}
         let stonesT = -1;          // s since the last click, while its stones light up (-1 = not)
+        let dustAt = null;         // where the last click was {x, y} (CSS px), until its dust blows off
 
         // A click at (x, y) (CSS px): a puff of dust off the fingertip
         function startDust(x, y) {
@@ -1226,7 +1256,13 @@
         // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's or tomoe's center) on the mouse
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
-            if (HAND_LIKE) {
+            if (CURSOR_STYLE === "gauntlet") {
+                // the sprite's corner sits this far from the canvas's corner
+                const off = (CURSOR_SIZE - 1) / 2;
+                cursorEl.style.transform = "translate(" + Math.round(x - (HAND_TIP.x - GAUNTLET_WRIST.x + off) * CURSOR_PIXEL) + "px," + Math.round(y - (HAND_TIP.y - GAUNTLET_WRIST.y + off) * CURSOR_PIXEL) + "px)";
+                return;
+            }
+            if (CURSOR_STYLE === "hand") {
                 cursorEl.style.transform = "translate(" + Math.round(x - HAND_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - HAND_TIP.y * CURSOR_PIXEL) + "px)";
                 return;
             }
@@ -1250,7 +1286,7 @@
             if (e.pointerType === "touch") return;
             cursorClickT = 0;
             if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
-            if (CURSOR_STYLE === "gauntlet" && !blocked) { handDown = true; stonesT = 0; startDust(e.clientX, e.clientY); }
+            if (CURSOR_STYLE === "gauntlet" && !blocked) { stonesT = 0; dustAt = { x: e.clientX, y: e.clientY }; }
         }, true);
         window.addEventListener("pointerup", () => { handDown = false; }, true);
         window.addEventListener("blur", () => { handDown = false; });
@@ -1260,10 +1296,18 @@
         function cursorTick(dt) {
             let key, draw;
             if (cursorClickT >= 0) cursorClickT += dt;
-            if (HAND_LIKE) {
+            if (CURSOR_STYLE === "hand") {
                 if (cursorClickT >= HAND_PRESS_T) cursorClickT = -1;
                 const pressed = handDown || cursorClickT >= 0;
-                // the gauntlet's stones lit right now, one after the other
+                key = "hand" + pressed;
+                draw = () => drawHand(pressed);
+                slashTick(dt);
+            } else if (CURSOR_STYLE === "gauntlet") {
+                const t = cursorClickT, end = GAUNTLET_SNAP[GAUNTLET_SNAP.length - 1][0];
+                if (dustAt && t >= GAUNTLET_SNAP[GAUNTLET_SNAP_AT][0]) { startDust(dustAt.x, dustAt.y); dustAt = null; }
+                if (t >= end) cursorClickT = -1;
+                const angle = cursorClickT >= 0 ? Math.round(swingAt(GAUNTLET_SNAP, t)) : 0;
+                // its stones lit right now, one after the other
                 let lit = "";
                 if (stonesT >= 0) {
                     stonesT += dt;
@@ -1273,9 +1317,9 @@
                     }
                     if (stonesT >= (GAUNTLET_STONES.length - 1) * GAUNTLET_STONE_T + GAUNTLET_STONE_LIT_T) stonesT = -1;
                 }
-                key = "hand" + pressed + lit;
-                draw = () => drawHand(pressed, lit);
-                if (CURSOR_STYLE === "hand") slashTick(dt); else dustTick(dt);
+                key = angle + lit;
+                draw = () => drawGauntlet(angle, lit);
+                dustTick(dt);
             } else if (CURSOR_STYLE === "katana") {
                 const end = KATANA_SWING[KATANA_SWING.length - 1][0];
                 const t = cursorClickT, windup = KATANA_SWING[1][0];
