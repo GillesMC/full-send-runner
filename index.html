@@ -838,9 +838,10 @@
            - "geta-image": the same geta and throw, but the picture assets/geta.png instead of the one drawn in code;
              with GETA_WALK, a pair (the same picture twice: geta have no left and right) that walks forward
              whenever the mouse moves; a click: the pointing foot taps
+           - "koi": a koi swimming, its tail swishing: the animation of assets/koi.ani, as is, no other effect
            ===================================================================== */
 
-        const CURSOR_STYLE = "geta-image"; // "hand", "katana", "shuriken", "tomoe", "gauntlet", "geta" or "geta-image"
+        const CURSOR_STYLE = "koi";        // "hand", "katana", "shuriken", "tomoe", "gauntlet", "geta", "geta-image" or "koi"
         const CURSOR_PIXEL = 2;            // size of one of its pixels on screen (CSS px)
         // --- Hand --- (O outline, W white, S shade; its fingertip points)
         const HAND_SPRITE = [
@@ -1005,8 +1006,17 @@
         const GETA_TAP_LIFT = 3;           // ...lifting this high each time (px)
         const GETA_FROM_IMAGE = CURSOR_STYLE === "geta-image";
         const IS_GETA = CURSOR_STYLE === "geta" || GETA_FROM_IMAGE;
+        // --- Koi --- the animation of assets/koi.ani: its 3 different 64px pictures, byte for byte, in
+        // assets/Koi_swim/koi_swim_n, played in its order at its speed, shown at KOI_SCALE
+        // (0.5 = 32 CSS px: on a retina screen every one of its pixels still shows)
+        const KOI_FRAMES = ["Koi_swim/koi_swim_1", "Koi_swim/koi_swim_2", "Koi_swim/koi_swim_3"];
+        const KOI_SEQUENCE = [0, 1, 2, 1];  // the frames it plays, in turn, round and round (as in the .ani)
+        const KOI_FRAME_T = 0.2;           // each one shows this long (s; the .ani's 12/60)
+        const KOI_SIZE = 64;               // the pictures' size (their pixels)
+        const KOI_SCALE = 0.5;             // size of one of their pixels on screen (CSS px)
+        const KOI_HOTSPOT = { x: 4, y: 1 }; // the pointing spot in them: the koi's head (the .ani's own hotspot)
         // the pixel size in use: CURSOR_PIXEL, or the picture's own for "geta-image" (its thrown getas too)
-        const cursorPixel = GETA_FROM_IMAGE ? GETA_IMAGE_PIXEL : CURSOR_PIXEL;
+        const cursorPixel = GETA_FROM_IMAGE ? GETA_IMAGE_PIXEL : CURSOR_STYLE === "koi" ? KOI_SCALE : CURSOR_PIXEL;
         // "geta-image": room left all round the pictures on the canvas, for their lifts, taps and strides (its pixels),
         // the room a turned picture takes, and where the two feet's centers sit on the canvas
         const getaMargin = GETA_LIFT + Math.max(GETA_STEP_LIFT, GETA_TAP_LIFT) + GETA_STRIDE;
@@ -1085,6 +1095,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
+            : CURSOR_STYLE === "koi" ? KOI_SIZE
             : GETA_FROM_IMAGE ? Math.max(getaRightAt.x, getaLeftAt.x, getaRightAt.y, getaLeftAt.y) + getaTurnedHalf + getaMargin
             : CURSOR_STYLE === "geta" ? 20
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
@@ -1308,6 +1319,12 @@
         let getaRunPhase = 0;      // steps run since the mouse last stood still (its whole part: whose turn it is)
         let getaWalkDir = [1, 0];  // the way it runs (unit vector, smoothed)
         let getaWalkLast = 0;      // when it last moved (performance.now, ms)
+
+        // The koi's pictures, and how long it has been swimming (s)
+        const koiImages = KOI_FRAMES.map(() => new Image());
+        let koiLoaded = 0;
+        let koiT = 0;
+        if (CURSOR_STYLE === "koi") koiImages.forEach((img, i) => { img.onload = () => { koiLoaded++; }; img.src = "assets/" + KOI_FRAMES[i] + ".png"; });
 
         // The geta on the mouse, `lift` pixels up; "geta-image": `feet` = how far each foot has moved,
         // [left, right] {x, y} (px, - y = lifted)
@@ -1609,6 +1626,10 @@
         // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's or tomoe's center) on the mouse
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
+            if (CURSOR_STYLE === "koi") {
+                cursorEl.style.transform = "translate(" + Math.round(x - KOI_HOTSPOT.x * cursorPixel) + "px," + Math.round(y - KOI_HOTSPOT.y * cursorPixel) + "px)";
+                return;
+            }
             if (GETA_FROM_IMAGE) {
                 // the left foot's toe
                 const hx = getaLeftAt.x - GETA_IMAGE_SIZE / 2 + GETA_IMAGE_HOTSPOT.x, hy = getaLeftAt.y - GETA_IMAGE_SIZE / 2 + GETA_IMAGE_HOTSPOT.y;
@@ -1696,6 +1717,12 @@
                 key = [GAUNTLET_SPRITE, GAUNTLET_COCKED, GAUNTLET_SNAPPED].indexOf(sprite) + "," + width + lit;
                 draw = () => drawGauntlet(sprite, width, lit);
                 dustTick(dt);
+            } else if (CURSOR_STYLE === "koi") {
+                koiT += dt;
+                const frame = KOI_SEQUENCE[Math.floor(koiT / KOI_FRAME_T) % KOI_SEQUENCE.length];
+                const ready = koiLoaded === KOI_FRAMES.length;
+                key = "koi" + frame + ready;
+                draw = () => { cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE); if (ready) cursorCtx.drawImage(koiImages[frame], 0, 0); };
             } else if (IS_GETA) {
                 // no throw: a click makes the pointing foot tap
                 let tap = 0;
