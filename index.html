@@ -935,23 +935,23 @@
         // assets/geta.cur): its board (the top, then its thickness), two teeth under it, and a V strap
         // on top from a knot near the toe.
         // Along the board: u, from the toe (0) to the heel; across it: v (+ = the side facing us, on the left)
-        const GETA_LENGTH = 18;            // toe to heel (its pixels)
-        const GETA_WIDTH = 10;             // side to side
-        const GETA_CORNER = 1.3;           // how round its corners are
+        const GETA_LENGTH = 14;            // toe to heel (its pixels)
+        const GETA_WIDTH = 8;              // side to side
+        const GETA_CORNER = 1;             // how round its corners are
         const GETA_ANGLE = 50;             // how much it is turned, toe up-left to heel down-right (degrees)
         const GETA_VIEW = 0.68;            // how high we look at it from: 1 = straight from above, lower = flatter
-        const GETA_BOARD = 2;              // the board's thickness
-        const GETA_TEETH = 3;              // how far the teeth come down under it
-        const GETA_TOOTH = 3;              // each tooth's thickness, along the board
+        const GETA_BOARD = 1.6;            // the board's thickness
+        const GETA_TEETH = 2.4;            // how far the teeth come down under it
+        const GETA_TOOTH = 2.4;            // each tooth's thickness, along the board
         const GETA_TOOTH_IN = 0.2;         // the teeth, this far in from the board's sides
         const GETA_TEETH_AT = [0.24, 0.74]; // where they are along the board (0 = toe .. 1 = heel)
         const GETA_DEPTH = [0, 0.9];       // which way "down" goes on screen (per pixel down)
-        const GETA_KNOT = 2.6;             // the strap's knot, this far from the toe
+        const GETA_KNOT = 2;               // the strap's knot, this far from the toe
         const GETA_STRAP_TO = 0.72;        // the strap's two ends, this far along the board (0..1)...
-        const GETA_STRAP_IN = 2;           // ...and this far in from its sides
-        const GETA_STRAP_W = 0.65;         // the strap's half thickness
-        const GETA_KNOT_R = 1;             // the knot's radius
-        const GETA_TOE = { x: 2, y: 8 };   // the pointing spot: the toe's corner on the left, on the canvas (its pixels)
+        const GETA_STRAP_IN = 1.6;          // ...and this far in from its sides
+        const GETA_STRAP_W = 0.55;         // the strap's half thickness
+        const GETA_KNOT_R = 0.8;           // the knot's radius
+        const GETA_TOE = { x: 2, y: 7 };   // the pointing spot: the toe's corner on the left, on the canvas (its pixels)
         const GETA_COLORS = {
             outline: "#14151c", top: "#d89a5a", lit: "#f2c07f", side: "#8a5226", tooth: "#5e381b",
             strap: "#c8283a", knot: "#2a1a10", flick: "#ffffff"
@@ -1031,7 +1031,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
-            : CURSOR_STYLE === "geta" ? 24
+            : CURSOR_STYLE === "geta" ? 20
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
