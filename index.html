@@ -958,31 +958,38 @@
             outline: "#14151c", top: "#d89a5a", lit: "#f2c07f", side: "#8a5226", tooth: "#5e381b",
             strap: "#c8283a", knot: "#2a1a10"
         };
-        // --- The throw: a click hurls the geta hard to the right; it smacks into the window's edge, bounces off and falls ---
-        const GETA_THROW_SPEED_X = [560, 680];  // its speed to the right as it leaves (its pixels/s)...
-        const GETA_THROW_SPEED_Y = [-50, -10];  // ...and down (- = up): nearly straight
-        const GETA_THROW_GRAVITY = 160;    // it drops a little on the way (its pixels/s²)...
-        const GETA_FALL_GRAVITY = 700;     // ...and fast once it has hit
-        const GETA_THROW_SPIN = [5, 6.5];  // how fast it spins (turns/s, clockwise)
-        const GETA_GHOSTS = [0.025, 0.05]; // white afterimages trailing it, this long behind it (s)
+        // --- The throw: a click tosses the geta off in a small arc, turning, fading away ---
+        // (for a hard throw instead: GETA_HIT_EDGE true, GETA_GHOSTS [0.025, 0.05], GETA_SHAKE 6, GETA_THROW_FADE_T 0,
+        // speeds [560, 680] / [-50, -10], gravity 160, spin [5, 6.5])
+        const GETA_THROW_SPEED_X = [110, 150];  // its speed to the right as it leaves (its pixels/s)...
+        const GETA_THROW_SPEED_Y = [-150, -110]; // ...and down (- = up)
+        const GETA_THROW_GRAVITY = 520;    // then it falls (its pixels/s²)...
+        const GETA_FALL_GRAVITY = 700;     // ...faster once it has hit the window's edge
+        const GETA_THROW_SPIN = [0.8, 1.2]; // how fast it turns (turns/s, clockwise)
+        const GETA_THROW_FADE_T = 0.45;    // it fades away over this long (s; 0 = no fading, it falls off the window)
+        const GETA_HIT_EDGE = false;       // true: it smacks into the window's right edge (impact star, shake, bounce)
+        const GETA_GHOSTS = [];            // white afterimages trailing it, this long behind it (s)
         const GETA_BOUNCE = [-0.25, -180]; // off the edge: its speed right (x its speed as it hit), and up (its pixels/s)
         const GETA_IMPACT_RAYS = [9, 5];   // the impact star: its long and short rays (its pixels)...
         const GETA_IMPACT_T = 0.15;        // ...shrinking away over this long (s)
         const GETA_IMPACT_COLORS = { rays: "#ffffff", core: "#ffe24a" };
-        const GETA_SHAKE = 6;              // on impact the game shakes this far (CSS px)...
+        const GETA_SHAKE = 0;              // on impact the game shakes this far (CSS px)...
         const GETA_SHAKE_T = 0.25;         // ...dying down over this long (s)
         const GETA_THROW_STEPS = 32;       // angles it is drawn at, per turn
         const GETA_THROW_MAX_T = 3;        // gone after this long anyway (s)
-        const GETA_GONE_T = 0.25;          // the mouse has no geta this long after a throw (s)...
+        const GETA_GONE_T = 0.2;           // the mouse has no geta this long after a throw (s)...
         const GETA_LIFT = 2;               // ...then a new one drops in from this high (its pixels)...
         const GETA_LIFT_T = 0.07;          // ...landing in this long (s)
         // --- Geta from a picture ("geta-image"): assets/geta.png, pixel for pixel assets/geta.cur, shown in
-        // CURSOR_PIXEL pixels like the others; it is thrown the same way (GETA_THROW_* and the rest above)
+        // its own GETA_IMAGE_PIXEL pixels; it is thrown the same way (GETA_THROW_* and the rest above)
         const GETA_IMAGE = "assets/geta.png";
+        const GETA_IMAGE_PIXEL = 1;        // size of one of its pixels on screen (CSS px): 1 = the picture's own size
         const GETA_IMAGE_SIZE = 32;        // the picture's size (its pixels)
         const GETA_IMAGE_HOTSPOT = { x: 5, y: 8 }; // the pointing spot in it: the toe (the .cur's own hotspot)
         const GETA_FROM_IMAGE = CURSOR_STYLE === "geta-image";
         const IS_GETA = CURSOR_STYLE === "geta" || GETA_FROM_IMAGE;
+        // the pixel size in use: CURSOR_PIXEL, or the picture's own for "geta-image" (its thrown getas too)
+        const cursorPixel = GETA_FROM_IMAGE ? GETA_IMAGE_PIXEL : CURSOR_PIXEL;
 
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
@@ -1060,7 +1067,7 @@
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
-        cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * CURSOR_PIXEL + "px";
+        cursorEl.style.width = cursorEl.style.height = CURSOR_SIZE * cursorPixel + "px";
         let cursorClickT = -1;     // s since the last click, -1 = none going on
         let cursorLast = null;     // the mouse's last spot {x, y}
         let cursorDrawn = null;    // what was drawn last (redrawn only when it changes)
@@ -1299,10 +1306,10 @@
         let slashShown = false;    // something is drawn on it
         let handDown = false;      // the mouse button is held
         function slashResize() {
-            slashEl.width = Math.ceil(innerWidth / CURSOR_PIXEL);
-            slashEl.height = Math.ceil(innerHeight / CURSOR_PIXEL);
-            slashEl.style.width = slashEl.width * CURSOR_PIXEL + "px";
-            slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
+            slashEl.width = Math.ceil(innerWidth / cursorPixel);
+            slashEl.height = Math.ceil(innerHeight / cursorPixel);
+            slashEl.style.width = slashEl.width * cursorPixel + "px";
+            slashEl.style.height = slashEl.height * cursorPixel + "px";
             slashShown = true; // redraw
         }
         if (["hand", "gauntlet", "geta", "geta-image"].includes(CURSOR_STYLE)) { slashResize(); window.addEventListener("resize", slashResize); }
@@ -1313,7 +1320,7 @@
             const a = randIn(SLASH_ANGLE) * Math.PI / 180 * (Math.random() < 0.5 ? 1 : -1);
             const dir = Math.random() < 0.5 ? 1 : -1;
             slashes.push({
-                x: x / CURSOR_PIXEL, y: y / CURSOR_PIXEL, dx: Math.cos(a) * dir, dy: Math.sin(a) * dir,
+                x: x / cursorPixel, y: y / cursorPixel, dx: Math.cos(a) * dir, dy: Math.sin(a) * dir,
                 bulge: Math.random() < 0.5 ? 1 : -1, t: 0
             });
         }
@@ -1397,7 +1404,7 @@
             for (let i = 0; i < DUST_COUNT; i++) {
                 const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * DUST_SPREAD;
                 dust.push({
-                    x: x / CURSOR_PIXEL + Math.cos(a) * r, y: y / CURSOR_PIXEL + Math.sin(a) * r,
+                    x: x / cursorPixel + Math.cos(a) * r, y: y / cursorPixel + Math.sin(a) * r,
                     vx: randIn(DUST_SPEED_X), vy: randIn(DUST_SPEED_Y), t: 0, life: randIn(DUST_LIFE),
                     color: DUST_COLORS[Math.floor(Math.random() * DUST_COLORS.length)]
                 });
@@ -1460,11 +1467,14 @@
                 getaThrowOff = [cx - GETA_TOE.x, cy - GETA_TOE.y];
             }
             thrown.push({
-                x: x / CURSOR_PIXEL + getaThrowOff[0], y: y / CURSOR_PIXEL + getaThrowOff[1],
+                x: x / cursorPixel + getaThrowOff[0], y: y / cursorPixel + getaThrowOff[1],
                 vx: randIn(GETA_THROW_SPEED_X), vy: randIn(GETA_THROW_SPEED_Y), spin: randIn(GETA_THROW_SPIN), turn: 0, t: 0,
                 hit: false, trail: [] // trail: where it was, {t, x, y, turn}, for its afterimages
             });
         }
+
+        // how solid a thrown geta still is (1 .. 0, as it fades away)
+        const getaThrowAlpha = (g) => GETA_THROW_FADE_T > 0 ? Math.max(0, 1 - g.t / GETA_THROW_FADE_T) : 1;
 
         function getaThrowTick(dt) {
             const { size, frames } = getaThrowFrames || { size: 0, frames: [] };
@@ -1475,14 +1485,14 @@
                 g.t += dt; g.vy += (g.hit ? GETA_FALL_GRAVITY : GETA_THROW_GRAVITY) * dt;
                 g.x += g.vx * dt; g.y += g.vy * dt; g.turn += g.spin * dt;
                 // smack: its edge reaches the window's right edge
-                if (!g.hit && g.x + size / 3 >= slashEl.width) {
+                if (GETA_HIT_EDGE && !g.hit && g.x + size / 3 >= slashEl.width) {
                     g.hit = true;
                     g.x = slashEl.width - size / 3;
                     impacts.push({ x: slashEl.width - 1, y: g.y, t: 0 });
                     g.vx *= GETA_BOUNCE[0]; g.vy = GETA_BOUNCE[1]; g.spin = -g.spin / 2;
                     shakeT = 0;
                 }
-                if (g.t >= GETA_THROW_MAX_T || g.y > slashEl.height + size) thrown.splice(i, 1);
+                if (g.t >= GETA_THROW_MAX_T || (GETA_THROW_FADE_T > 0 && g.t >= GETA_THROW_FADE_T) || g.y > slashEl.height + size) thrown.splice(i, 1);
             }
             for (let i = impacts.length - 1; i >= 0; i--) if ((impacts[i].t += dt) >= GETA_IMPACT_T) impacts.splice(i, 1);
             // the game shakes, less and less
@@ -1510,7 +1520,9 @@
                         const p = g.trail.find(q => q.t >= g.t - back);
                         if (p && p.t < g.t) drawTurned(getaGhost, p.x, p.y, p.turn);
                     }
+                    slashCtx.globalAlpha = getaThrowAlpha(g);
                     drawTurned(getaImage, g.x, g.y, g.turn);
+                    slashCtx.globalAlpha = 1;
                 }
             }
             const frameAt = (turn) => frames[((Math.round(turn * GETA_THROW_STEPS) % GETA_THROW_STEPS) + GETA_THROW_STEPS) % GETA_THROW_STEPS];
@@ -1527,11 +1539,13 @@
                     }
                 }
                 const colors = frameAt(g.turn), x0 = Math.round(g.x - size / 2), y0 = Math.round(g.y - size / 2);
+                slashCtx.globalAlpha = getaThrowAlpha(g);
                 for (let n = 0; n < colors.length; n++) {
                     if (!colors[n]) continue;
                     slashCtx.fillStyle = colors[n];
                     slashCtx.fillRect(x0 + n % size, y0 + Math.floor(n / size), 1, 1);
                 }
+                slashCtx.globalAlpha = 1;
             }
             // impact stars: 8 rays, long and short in turn, and a hot core, all shrinking
             for (const im of impacts) {
@@ -1551,23 +1565,23 @@
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
             if (GETA_FROM_IMAGE) {
-                cursorEl.style.transform = "translate(" + Math.round(x - GETA_IMAGE_HOTSPOT.x * CURSOR_PIXEL) + "px," + Math.round(y - (GETA_LIFT + GETA_IMAGE_HOTSPOT.y) * CURSOR_PIXEL) + "px)";
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_IMAGE_HOTSPOT.x * cursorPixel) + "px," + Math.round(y - (GETA_LIFT + GETA_IMAGE_HOTSPOT.y) * cursorPixel) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "geta") {
-                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TOE.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TOE.y * CURSOR_PIXEL) + "px)";
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TOE.x * cursorPixel) + "px," + Math.round(y - GETA_TOE.y * cursorPixel) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") {
-                cursorEl.style.transform = "translate(" + Math.round(x - HAND_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - HAND_TIP.y * CURSOR_PIXEL) + "px)";
+                cursorEl.style.transform = "translate(" + Math.round(x - HAND_TIP.x * cursorPixel) + "px," + Math.round(y - HAND_TIP.y * cursorPixel) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "katana") {
                 const a = KATANA_REST * Math.PI / 180;
-                ox = -Math.cos(a) * katanaTipR * CURSOR_PIXEL;
-                oy = -Math.sin(a) * katanaTipR * CURSOR_PIXEL;
+                ox = -Math.cos(a) * katanaTipR * cursorPixel;
+                oy = -Math.sin(a) * katanaTipR * cursorPixel;
             }
-            const half = CURSOR_SIZE * CURSOR_PIXEL / 2;
+            const half = CURSOR_SIZE * cursorPixel / 2;
             cursorEl.style.transform = "translate(" + Math.round(x + ox - half) + "px," + Math.round(y + oy - half) + "px)";
         }
 
