@@ -74,7 +74,7 @@
             pointer-events: none;
         }
 
-        /* THE MOUSE — a hand, a katana, a shuriken, a tomoe or a gauntlet drawn in code (see CURSOR_* in the script). The
+        /* THE MOUSE — a hand, a katana, a shuriken, a tomoe, a gauntlet or a geta drawn in code (see CURSOR_* in the script). The
            system arrow is only hidden once the script has it running. */
         html.custom-cursor,
         html.custom-cursor * {
@@ -91,7 +91,7 @@
             display: none;
         }
 
-        /* The hand's slashes / the gauntlet's dust: the whole window, in big pixels (see SLASH_*, DUST_*) */
+        /* The hand's slashes / the gauntlet's and geta's dust: the whole window, in big pixels (see SLASH_*, DUST_*) */
         #slash {
             position: fixed;
             left: 0;
@@ -822,7 +822,7 @@
 
         /* =====================================================================
            THE MOUSE — a pixel-art cursor in place of the arrow, drawn in code at every
-           angle so it stays crisp as it turns. Five to choose from (CURSOR_STYLE):
+           angle so it stays crisp as it turns. Six to choose from (CURSOR_STYLE):
            - "hand": a classic pointing hand; its finger presses on a click, and a click cuts
              an anime sword slash through that spot
            - "katana": its tip points; a click swings it in a quick slash, with a white trail
@@ -832,9 +832,11 @@
            - "gauntlet": the hand as a golden gauntlet set with six stones; on a click it turns round to
              snap its fingers (cocked, snapped), the stones light up one after the other, a puff of dust
              blows away, and it turns back to pointing
+           - "geta": a wooden sandal seen from the side, its toe points; on a click it lifts, then
+             clacks down on its teeth, kicking up a little dust
            ===================================================================== */
 
-        const CURSOR_STYLE = "gauntlet";   // "hand", "katana", "shuriken", "tomoe" or "gauntlet"
+        const CURSOR_STYLE = "geta";       // "hand", "katana", "shuriken", "tomoe", "gauntlet" or "geta"
         const CURSOR_PIXEL = 2;            // size of one of its pixels on screen (CSS px)
         // --- Hand --- (O outline, W white, S shade; its fingertip points)
         const HAND_SPRITE = [
@@ -929,6 +931,46 @@
         const GAUNTLET_COCKED_T = 0.08;    // ...stays cocked this long, then snaps (dust, stones)...
         const GAUNTLET_SNAPPED_T = 0.25;   // ...stays snapped this long, then turns back to pointing
         const GAUNTLET_TURN_THIN = 0.15;   // how thin it gets, mid-turn (x its width)
+        // --- Geta --- (O outline; wood: K lit top, N, M in shade; its strap: R red, r in shade; W the clack's flicks)
+        // Its toe on the left; all its pictures the same size
+        const GETA_SPRITE = [
+            "................",
+            "................",
+            "....OOOO........",
+            "...ORRRRO.......",
+            "..ORrOOrRO......",
+            ".OORrO.OrROOOOO.",
+            "OKKKKKKKKKKKKKKO",
+            "ONNNNNNNNNNNNNNO",
+            "OMMMMMMMMMMMMMMO",
+            ".OOOMMOOOOMMOOO.",
+            "...OMMO..OMMO...",
+            "...OMMO..OMMO...",
+            "...OOOO..OOOO..."
+        ];
+        // Clacked down: the same, with a flick out from each side where its teeth hit
+        const GETA_CLACK = [
+            "................",
+            "................",
+            "....OOOO........",
+            "...ORRRRO.......",
+            "..ORrOOrRO......",
+            ".OORrO.OrROOOOO.",
+            "OKKKKKKKKKKKKKKO",
+            "ONNNNNNNNNNNNNNO",
+            "OMMMMMMMMMMMMMMO",
+            ".OOOMMOOOOMMOOO.",
+            "W..OMMO..OMMO..W",
+            ".W.OMMO..OMMO.W.",
+            "...OOOO..OOOO..."
+        ];
+        const GETA_COLORS = { O: "#14151c", K: "#d89a5a", N: "#a8692f", M: "#6b4020", R: "#d0303e", r: "#7a1420", W: "#ffffff" };
+        const GETA_TIP = { x: 0, y: 6 };   // the pointing spot: its toe, on the board's top (grid line, its pixels)
+        const GETA_FEET = { x: 8, y: 13 }; // where its teeth hit the ground, the dust's start (grid line)
+        const GETA_LIFT = 2;               // on a click it lifts this high (its pixels)...
+        const GETA_LIFT_T = 0.07;          // ...for this long (s)...
+        const GETA_CLACK_T = 0.12;         // ...then clacks down, its flicks showing this long
+
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
         const DUST_COUNT = 26;             // grains per click
@@ -1000,6 +1042,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
+            : CURSOR_STYLE === "geta" ? Math.max(GETA_SPRITE.length, GETA_SPRITE[0].length)
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
@@ -1140,6 +1183,18 @@
             }
         }
 
+        // The geta: one of its pictures, `lift` pixels up
+        function drawGeta(sprite, lift) {
+            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+            sprite.forEach((row, y) => {
+                for (let x = 0; x < row.length; x++) {
+                    if (row[x] === "." || y - lift < 0) continue;
+                    cursorCtx.fillStyle = GETA_COLORS[row[x]];
+                    cursorCtx.fillRect(x, y - lift, 1, 1);
+                }
+            });
+        }
+
         // The hand, its finger bent down when pressed
         function drawHand(pressed) {
             cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
@@ -1172,7 +1227,7 @@
             slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
             slashShown = true; // redraw
         }
-        if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") { slashResize(); window.addEventListener("resize", slashResize); }
+        if (["hand", "gauntlet", "geta"].includes(CURSOR_STYLE)) { slashResize(); window.addEventListener("resize", slashResize); }
         else slashEl.remove();
 
         // A click: a cut through (x, y) (CSS px), at a random slant, either way, curving either way
@@ -1259,13 +1314,13 @@
         let stonesT = -1;          // s since the last click, while its stones light up (-1 = not)
         let dustAt = null;         // where the last click was {x, y} (CSS px), until it snaps
 
-        // A click at (x, y) (CSS px): a puff of dust off the fingertip
-        function startDust(x, y) {
+        // A click at (x, y) (CSS px): a puff of dust off the fingertip; `both`: half of it blown to the left
+        function startDust(x, y, both) {
             for (let i = 0; i < DUST_COUNT; i++) {
                 const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * DUST_SPREAD;
                 dust.push({
                     x: x / CURSOR_PIXEL + Math.cos(a) * r, y: y / CURSOR_PIXEL + Math.sin(a) * r,
-                    vx: randIn(DUST_SPEED_X), vy: randIn(DUST_SPEED_Y), t: 0, life: randIn(DUST_LIFE),
+                    vx: randIn(DUST_SPEED_X) * (both && i % 2 ? -1 : 1), vy: randIn(DUST_SPEED_Y), t: 0, life: randIn(DUST_LIFE),
                     color: DUST_COLORS[Math.floor(Math.random() * DUST_COLORS.length)]
                 });
             }
@@ -1290,6 +1345,10 @@
         // The pointing spot (the hand's fingertip, the katana's tip at rest, the shuriken's or tomoe's center) on the mouse
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
+            if (CURSOR_STYLE === "geta") {
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TIP.y * CURSOR_PIXEL) + "px)";
+                return;
+            }
             if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") {
                 cursorEl.style.transform = "translate(" + Math.round(x - HAND_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - HAND_TIP.y * CURSOR_PIXEL) + "px)";
                 return;
@@ -1314,7 +1373,7 @@
             if (e.pointerType === "touch") return;
             cursorClickT = 0;
             if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
-            if (CURSOR_STYLE === "gauntlet" && !blocked) dustAt = { x: e.clientX, y: e.clientY };
+            if ((CURSOR_STYLE === "gauntlet" || CURSOR_STYLE === "geta") && !blocked) dustAt = { x: e.clientX, y: e.clientY };
         }, true);
         window.addEventListener("pointerup", () => { handDown = false; }, true);
         window.addEventListener("blur", () => { handDown = false; });
@@ -1357,6 +1416,19 @@
                 }
                 key = [GAUNTLET_SPRITE, GAUNTLET_COCKED, GAUNTLET_SNAPPED].indexOf(sprite) + "," + width + lit;
                 draw = () => drawGauntlet(sprite, width, lit);
+                dustTick(dt);
+            } else if (CURSOR_STYLE === "geta") {
+                // lifted, then clacked down (dust from under its teeth), then at rest
+                const t = cursorClickT;
+                if (dustAt && t >= GETA_LIFT_T) {
+                    startDust(dustAt.x + (GETA_FEET.x - GETA_TIP.x) * CURSOR_PIXEL, dustAt.y + (GETA_FEET.y - GETA_TIP.y) * CURSOR_PIXEL, true);
+                    dustAt = null;
+                }
+                if (t >= GETA_LIFT_T + GETA_CLACK_T) cursorClickT = -1;
+                const lift = cursorClickT >= 0 && t < GETA_LIFT_T ? GETA_LIFT : 0;
+                const clack = cursorClickT >= 0 && t >= GETA_LIFT_T;
+                key = "geta" + lift + clack;
+                draw = () => drawGeta(clack ? GETA_CLACK : GETA_SPRITE, lift);
                 dustTick(dt);
             } else if (CURSOR_STYLE === "katana") {
                 const end = KATANA_SWING[KATANA_SWING.length - 1][0];
