@@ -959,6 +959,7 @@
             strap: "#c8283a", knot: "#2a1a10"
         };
         // --- The throw: a click tosses the geta off in a small arc, turning, fading away ---
+        const GETA_THROW = false;          // false: no effect at all, a click leaves the geta as it is
         // (for a hard throw instead: GETA_HIT_EDGE true, GETA_GHOSTS [0.025, 0.05], GETA_SHAKE 6, GETA_THROW_FADE_T 0,
         // speeds [560, 680] / [-50, -10], gravity 160, spin [5, 6.5])
         const GETA_THROW_SPEED_X = [110, 150];  // its speed to the right as it leaves (its pixels/s)...
@@ -1597,7 +1598,7 @@
             cursorClickT = 0;
             if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
             if (CURSOR_STYLE === "gauntlet" && !blocked) dustAt = { x: e.clientX, y: e.clientY };
-            if (IS_GETA && !blocked) throwGeta(e.clientX, e.clientY);
+            if (IS_GETA && GETA_THROW && !blocked) throwGeta(e.clientX, e.clientY);
         }, true);
         window.addEventListener("pointerup", () => { handDown = false; }, true);
         window.addEventListener("blur", () => { handDown = false; });
@@ -1643,6 +1644,7 @@
                 dustTick(dt);
             } else if (IS_GETA) {
                 // after a throw: no geta on the mouse, then a new one drops in, then at rest
+                if (!GETA_THROW) cursorClickT = -1;
                 const t = cursorClickT;
                 if (t >= GETA_GONE_T + GETA_LIFT_T) cursorClickT = -1;
                 const gone = cursorClickT >= 0 && t < GETA_GONE_T;
