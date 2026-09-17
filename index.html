@@ -835,7 +835,9 @@
            - "geta": a wooden sandal seen from above at a slant (as in assets/geta.cur), its toe up-left; a
              click hurls it: it shoots off spinning hard, smacks into the window's edge (impact star, the
              game shakes), bounces off and falls away, and a new one drops back onto the mouse
-           - "geta-image": the same geta and throw, but the picture assets/geta.png instead of the one drawn in code
+           - "geta-image": the same geta and throw, but the picture assets/geta.png instead of the one drawn in code;
+             with GETA_WALK, a pair (the same picture twice: geta have no left and right) that walks forward
+             whenever the mouse moves; a click: the pointing foot taps
            ===================================================================== */
 
         const CURSOR_STYLE = "geta-image"; // "hand", "katana", "shuriken", "tomoe", "gauntlet", "geta" or "geta-image"
@@ -987,10 +989,30 @@
         const GETA_IMAGE_PIXEL = 1;        // size of one of its pixels on screen (CSS px): 1 = the picture's own size
         const GETA_IMAGE_SIZE = 32;        // the picture's size (its pixels)
         const GETA_IMAGE_HOTSPOT = { x: 5, y: 8 }; // the pointing spot in it: the toe (the .cur's own hotspot)
+        // --- Walking ("geta-image"): a pair side by side, facing the same way; while the mouse moves they walk
+        // forward (the way the mouse goes): the foot on the ground slides back while the other one lifts and
+        // passes it, then they swap. A click: the left foot (the pointing one) taps ---
+        const GETA_WALK = true;            // false: one geta, no walking
+        const GETA_RIGHT_IMAGE = "assets/geta.png"; // the right foot's picture (geta are the same for both feet)
+        const GETA_RIGHT_TURN = 0;         // it is turned this much (degrees, + = clockwise)
+        const GETA_RIGHT_AT = { x: 12, y: -13 }; // its center, from the left one's center (px): beside it, the way they face
+        const GETA_RUN_STEPS = 9;          // steps per second while the mouse moves
+        const GETA_STEP_LIFT = 3;          // a stepping foot lifts this high (px), halfway through its step
+        const GETA_STRIDE = 5;             // each foot goes from this far behind to this far ahead (px)
+        const GETA_WALK_STOP_T = 0.1;      // the mouse still this long (s): both feet down, side by side
+        const GETA_TAPS = 2;               // a click: the pointing foot taps this many times...
+        const GETA_TAP_T = 0.24;           // ...in this long (s)...
+        const GETA_TAP_LIFT = 3;           // ...lifting this high each time (px)
         const GETA_FROM_IMAGE = CURSOR_STYLE === "geta-image";
         const IS_GETA = CURSOR_STYLE === "geta" || GETA_FROM_IMAGE;
         // the pixel size in use: CURSOR_PIXEL, or the picture's own for "geta-image" (its thrown getas too)
         const cursorPixel = GETA_FROM_IMAGE ? GETA_IMAGE_PIXEL : CURSOR_PIXEL;
+        // "geta-image": room left all round the pictures on the canvas, for their lifts, taps and strides (its pixels),
+        // the room a turned picture takes, and where the two feet's centers sit on the canvas
+        const getaMargin = GETA_LIFT + Math.max(GETA_STEP_LIFT, GETA_TAP_LIFT) + GETA_STRIDE;
+        const getaTurnedHalf = Math.ceil(GETA_IMAGE_SIZE * Math.SQRT2 / 2);
+        const getaLeftAt = { x: getaMargin + getaTurnedHalf, y: getaMargin + getaTurnedHalf + Math.max(0, -GETA_RIGHT_AT.y) };
+        const getaRightAt = { x: getaLeftAt.x + GETA_RIGHT_AT.x, y: getaLeftAt.y + GETA_RIGHT_AT.y };
 
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
@@ -1063,7 +1085,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
-            : GETA_FROM_IMAGE ? GETA_IMAGE_SIZE + GETA_LIFT
+            : GETA_FROM_IMAGE ? Math.max(getaRightAt.x, getaLeftAt.x, getaRightAt.y, getaLeftAt.y) + getaTurnedHalf + getaMargin
             : CURSOR_STYLE === "geta" ? 20
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
@@ -1250,6 +1272,9 @@
 
         // The geta's picture ("geta-image"), and its afterimage: the same shape, white, every other pixel
         const getaImage = new Image();
+        const getaRightImage = new Image();
+        const getaRightTurned = document.createElement("canvas"); // the right foot, turned by GETA_RIGHT_TURN
+        let getaRightLoaded = false;
         const getaGhost = document.createElement("canvas");
         let getaImageLoaded = false;
         if (GETA_FROM_IMAGE) {
@@ -1267,14 +1292,33 @@
                 getaImageLoaded = true;
             };
             getaImage.src = GETA_IMAGE;
+            if (GETA_WALK) {
+                getaRightImage.onload = () => {
+                    getaRightTurned.width = getaRightTurned.height = 2 * getaTurnedHalf;
+                    const g = getaRightTurned.getContext("2d");
+                    g.imageSmoothingQuality = "high";
+                    g.translate(getaTurnedHalf, getaTurnedHalf);
+                    g.rotate(GETA_RIGHT_TURN * Math.PI / 180);
+                    g.drawImage(getaRightImage, -GETA_IMAGE_SIZE / 2, -GETA_IMAGE_SIZE / 2);
+                    getaRightLoaded = true;
+                };
+                getaRightImage.src = GETA_RIGHT_IMAGE;
+            }
         }
+        let getaRunPhase = 0;      // steps run since the mouse last stood still (its whole part: whose turn it is)
+        let getaWalkDir = [1, 0];  // the way it runs (unit vector, smoothed)
+        let getaWalkLast = 0;      // when it last moved (performance.now, ms)
 
-        // The geta on the mouse, `lift` pixels up
-        function drawGeta(lift) {
+        // The geta on the mouse, `lift` pixels up; "geta-image": `feet` = how far each foot has moved,
+        // [left, right] {x, y} (px, - y = lifted)
+        function drawGeta(lift, feet) {
             if (GETA_FROM_IMAGE) {
-                // the canvas has GETA_LIFT pixels of room above the picture
                 cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
-                if (getaImageLoaded) cursorCtx.drawImage(getaImage, 0, GETA_LIFT - lift);
+                if (!getaImageLoaded) return;
+                const [left, right] = feet || [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+                if (GETA_WALK && getaRightLoaded)
+                    cursorCtx.drawImage(getaRightTurned, getaRightAt.x - getaTurnedHalf + right.x, getaRightAt.y - getaTurnedHalf - lift + right.y);
+                cursorCtx.drawImage(getaImage, getaLeftAt.x - GETA_IMAGE_SIZE / 2 + left.x, getaLeftAt.y - GETA_IMAGE_SIZE / 2 - lift + left.y);
                 return;
             }
             const [ox, oy] = getaToeMiddle(GETA_TOE.x, GETA_TOE.y - lift);
@@ -1566,7 +1610,9 @@
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
             if (GETA_FROM_IMAGE) {
-                cursorEl.style.transform = "translate(" + Math.round(x - GETA_IMAGE_HOTSPOT.x * cursorPixel) + "px," + Math.round(y - (GETA_LIFT + GETA_IMAGE_HOTSPOT.y) * cursorPixel) + "px)";
+                // the left foot's toe
+                const hx = getaLeftAt.x - GETA_IMAGE_SIZE / 2 + GETA_IMAGE_HOTSPOT.x, hy = getaLeftAt.y - GETA_IMAGE_SIZE / 2 + GETA_IMAGE_HOTSPOT.y;
+                cursorEl.style.transform = "translate(" + Math.round(x - hx * cursorPixel) + "px," + Math.round(y - hy * cursorPixel) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "geta") {
@@ -1589,6 +1635,14 @@
         window.addEventListener("pointermove", (e) => {
             if (e.pointerType === "touch") return;
             if (cursorLast) shurikenSpin = Math.min(SHURIKEN_SPIN_MAX, shurikenSpin + Math.hypot(e.clientX - cursorLast.x, e.clientY - cursorLast.y) * SHURIKEN_SPIN_PER_PX);
+            if (cursorLast && GETA_FROM_IMAGE && GETA_WALK) {
+                const dx = e.clientX - cursorLast.x, dy = e.clientY - cursorLast.y, d = Math.hypot(dx, dy);
+                if (d > 0) {
+                    const wx = getaWalkDir[0] * 0.7 + dx / d * 0.3, wy = getaWalkDir[1] * 0.7 + dy / d * 0.3, wd = Math.hypot(wx, wy) || 1;
+                    getaWalkDir = [wx / wd, wy / wd];
+                    getaWalkLast = performance.now();
+                }
+            }
             cursorLast = { x: e.clientX, y: e.clientY };
             placeCursor(e.clientX, e.clientY);
             cursorEl.style.display = "block";
@@ -1643,14 +1697,35 @@
                 draw = () => drawGauntlet(sprite, width, lit);
                 dustTick(dt);
             } else if (IS_GETA) {
+                // no throw: a click makes the pointing foot tap
+                let tap = 0;
+                if (!GETA_THROW && cursorClickT >= 0) {
+                    if (cursorClickT >= GETA_TAP_T) cursorClickT = -1;
+                    else tap = Math.round(Math.abs(Math.sin(Math.PI * GETA_TAPS * cursorClickT / GETA_TAP_T)) * GETA_TAP_LIFT);
+                }
                 // after a throw: no geta on the mouse, then a new one drops in, then at rest
-                if (!GETA_THROW) cursorClickT = -1;
-                const t = cursorClickT;
-                if (t >= GETA_GONE_T + GETA_LIFT_T) cursorClickT = -1;
-                const gone = cursorClickT >= 0 && t < GETA_GONE_T;
-                const lift = cursorClickT >= 0 && !gone ? Math.round(GETA_LIFT * (1 - (t - GETA_GONE_T) / GETA_LIFT_T)) : 0;
-                key = "geta" + gone + lift + getaImageLoaded;
-                draw = gone ? () => cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE) : () => drawGeta(lift);
+                const t = cursorClickT, throwing = GETA_THROW && t >= 0;
+                if (throwing && t >= GETA_GONE_T + GETA_LIFT_T) cursorClickT = -1;
+                const gone = throwing && t < GETA_GONE_T;
+                const lift = throwing && !gone ? Math.round(GETA_LIFT * (1 - (t - GETA_GONE_T) / GETA_LIFT_T)) : 0;
+                // walking: the feet step in turn, GETA_RUN_STEPS a second; standing still, both down side by side
+                const feet = [{ x: 0, y: -tap }, { x: 0, y: 0 }];
+                if (GETA_FROM_IMAGE && GETA_WALK) {
+                    if (performance.now() - getaWalkLast > GETA_WALK_STOP_T * 1000) getaRunPhase = 0;
+                    else {
+                        getaRunPhase += dt * GETA_RUN_STEPS;
+                        // k: 0..1 through the step; the stepping foot goes from behind to ahead, lifted in the
+                        // middle, while the one on the ground slides from ahead to behind (as the body moves on)
+                        const k = getaRunPhase - Math.floor(getaRunPhase), along = GETA_STRIDE * (2 * k - 1);
+                        const stepping = Math.floor(getaRunPhase) % 2, planted = 1 - stepping;
+                        feet[stepping].x += Math.round(getaWalkDir[0] * along);
+                        feet[stepping].y += Math.round(getaWalkDir[1] * along - GETA_STEP_LIFT * Math.sin(Math.PI * k));
+                        feet[planted].x -= Math.round(getaWalkDir[0] * along);
+                        feet[planted].y -= Math.round(getaWalkDir[1] * along);
+                    }
+                }
+                key = "geta" + gone + lift + getaImageLoaded + getaRightLoaded + JSON.stringify(feet);
+                draw = gone ? () => cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE) : () => drawGeta(lift, feet);
                 getaThrowTick(dt);
             } else if (CURSOR_STYLE === "katana") {
                 const end = KATANA_SWING[KATANA_SWING.length - 1][0];
