@@ -153,17 +153,17 @@
         const LOADING_HOLD_T = 0.25;       // once everything is in, LOADING stays this long before ENTER replaces it (s)
 
         // --- LOADING screen: the frog on its lily pad (assets/loading screen/), through an old CRT ---
-        // Measured on "Loading Screen.png". Once loading is done, ENTER replaces LOADING and
+        // Measured on the reference mockup. Once loading is done, ENTER replaces LOADING and
         // the screen waits for a click (or a key) anywhere: that first press turns the sound on.
         // A soft CRT, not TV static: everything below is drawn in code, the frames are never changed.
         const BOOT_BG = "#0b0c1a";         // very dark navy, a little darker than the reference's #0e0f1d:
         // the grain lifts it back to it
         const BOOT_BG_NOISE = 2;           // background texture: each pixel +- up to this (0..255)
         const BOOT_VIGNETTE = 0.3;         // how dark the corners get (0 = no vignette)
-        // The frames: "from gif/frog_1..24", taken pixel for pixel out of Frog.gif (300x300 each).
+        // The frames: "from gif/frog_1..24", taken pixel for pixel out of the frog GIF (300x300 each).
         // How long each one stays up (s), in order; 0 = a single screen refresh, as fast as it goes.
         const FROG_FRAME_T = [...Array(14).fill(0.1), ...Array(10).fill(0)];
-        // Frames 14..24 sit too low in Frog.gif (left over from centering each frame on its own):
+        // Frames 14..24 sit too low in the GIF (left over from centering each frame on its own):
         // each frame is moved up by this much (px), so the lily pad's widest row stays on y 184 of
         // the frame as in frames 1..13. Tune by a pixel or two if one still jumps.
         const FROG_FRAME_DY = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3, -5, -4, -5, -9, -8, -6, -10, -5, -6, -2];
@@ -584,10 +584,6 @@
             if (audioCtx && audioCtx.state === "suspended" && soundUnlocked) audioCtx.resume();
         }
 
-        // Where the coded sounds go: the SFX bus of the mix (see MIX), or straight out
-        // in <audio> mode, which has no buses
-        function sfxOutput() { return mix && mix.sfx ? mix.sfx : audioCtx.destination; }
-
         /* =====================================================================
            MIX — the music and sounds (assets/Music/)
            Two buses, MUSIC and SFX, into MASTER, then a safety limiter so the sum
@@ -602,8 +598,8 @@
         const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
         const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
-        const MIX_PORTAL = 0.7;            // a portal opening, churning and closing (coded: see portalSound)
-        const PORTAL_REVERB = 0.3;         // how much of the portal goes into its reverb (0 = dry)
+        const MIX_PORTAL_OPEN = 0.7;       // a portal opening
+        const MIX_PORTAL_CLOSE = 0.7;      // a portal closing
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
         const MIX_PRESS_START = 1.0;       // a press on PRESS START
         const MIX_SAMURAI_HM = 1.0;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
@@ -619,16 +615,23 @@
             tanchoSplash: "Music/tancho_koi_splash.wav",
             gummyStep: "Music/gummy_run.wav",
             samuraiHm: "Music/hm.wav",
-            pressStart: "Music/press_start.mp3"
+            pressStart: "Music/press_start.mp3",
+            portalOpen: "Music/portal_open.mp3",
+            portalClose: "Music/portal_closed.mp3"
         };
         // The theme loops on its own length, not the MP3's: an MP3 carries a little silence
         // before and after the music (the encoder's padding), which some browsers keep when
         // they decode it. Measure THEME_LENGTH again if theme.mp3 changes.
-        const THEME_LENGTH = 119.44;       // the music itself (s): theme.wav's exact length
+        const THEME_LENGTH = 119.44;       // the music itself (s): the original WAV's exact length
         const MP3_PADDING = 1105 / 48000;  // the silence the MP3 encoder puts before it (s)
         // Where the sound actually hits in each file (s): it is lined up so that this
         // moment, not the start of the file, lands on the frame it goes with.
-        const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09, gummyStep: 0.008, samuraiHm: 0.004 };
+        const SOUND_HIT = { tanchoJump: 0.065, tanchoSplash: 0.09, gummyStep: 0.008, samuraiHm: 0.004, portalOpen: 0, portalClose: 1.05 };
+        // The portal files are 8s long but their sound is over after PORTAL_SOUND_LENGTH (the rest
+        // is silence). portal_open.mp3 swells up right away, as the portal opens; portal_closed.mp3
+        // builds up and snaps shut at its SOUND_HIT: that moment lands on the portal being fully
+        // closed. Measure again if the files change.
+        const PORTAL_SOUND_LENGTH = 1.5;   // s
         // gummy_run.wav is a run of steps, one every ~0.1s: they are played ONE AT A TIME, one
         // per foot landing in the run cycle (GUMMY_STEP_FRAMES), so they always match the
         // animation. These are where some of its steps start (s, measured on the file), taken
@@ -786,126 +789,6 @@
             }
         }
 
-        // A portal's sound, coded (no file), in the style of Rick & Morty's portals: gooey and swirly.
-        // Opening: a "vwouRRP" — noise and a low buzz through a filter that swoops open, all through
-        // a phaser (the spinning sweep), with a low "whomp". While open: green liquid churning — a
-        // wobbling hum and bubbling noise through a slow phaser, with bubbles. Closing: a "fwoup",
-        // everything sucked back down, ending in a wet pop. openFor = s from the start of its
-        // opening to the start of its closing; x = the portal's spot (px), for the stereo.
-        let portalNoise = null;            // 2s of white noise, looped, built on first use
-        let portalReverb = null;           // a synthetic hall (decaying noise), shared by the portals
-        function portalSound(x, openFor) {
-            if (!audioCtx || audioCtx.state !== "running" || MIX_PORTAL <= 0) return;
-            const t = audioCtx.currentTime;
-            const hold = t + Math.max(openFor, 0.65); // the churning has swelled up by then
-            const closed = hold + PORTAL_OPEN_T;
-            if (!portalNoise) {
-                portalNoise = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
-                const data = portalNoise.getChannelData(0);
-                for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-            }
-            if (!portalReverb) {
-                const len = Math.floor(audioCtx.sampleRate * 2.4);
-                const ir = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
-                for (let ch = 0; ch < 2; ch++) {
-                    const data = ir.getChannelData(ch);
-                    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-                }
-                portalReverb = audioCtx.createConvolver();
-                portalReverb.buffer = ir;
-                portalReverb.connect(sfxOutput());
-            }
-            const gain = (v) => { const g = audioCtx.createGain(); g.gain.value = v; return g; };
-            const osc = (type, f) => { const o = audioCtx.createOscillator(); o.type = type; o.frequency.value = f; return o; };
-            const filter = (type, f, q) => { const b = audioCtx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
-            const noise = () => { const n = audioCtx.createBufferSource(); n.buffer = portalNoise; n.loop = true; return n; };
-            const play = (src, from, to, offset) => { src.start(from, offset || 0); src.stop(to); return src; };
-            // param: from `a` at time `at`, then exponential ramps through [value, time] pairs
-            const ramp = (param, at, a, ...steps) => {
-                param.setValueAtTime(a, at);
-                for (const [v, time] of steps) param.exponentialRampToValueAtTime(v, time);
-            };
-            // Phaser: a chain of all-pass filters whose frequency sweeps up and down (rate per s,
-            // around `base` Hz, +- depth), mixed with the dry sound. Returns [input, output].
-            const phaser = (from, to, rate, base, depth) => {
-                const input = gain(1), output = gain(1), sweep = play(osc("sine", rate), from, to);
-                let chain = input;
-                for (let i = 0; i < 6; i++) {
-                    const stage = filter("allpass", base, 0.7);
-                    sweep.connect(gain(depth)).connect(stage.frequency);
-                    chain = chain.connect(stage);
-                }
-                input.connect(output);
-                chain.connect(gain(0.9)).connect(output);
-                return [input, output];
-            };
-
-            // Everything goes through `out` (the volume), panned to the portal's side, with a reverb send
-            const out = gain(MIX_PORTAL);
-            let node = out;
-            if (audioCtx.createStereoPanner) {
-                const pan = audioCtx.createStereoPanner();
-                pan.pan.value = Math.max(-1, Math.min(1, (x / W * 2 - 1) * MIX_PAN));
-                node = node.connect(pan);
-            }
-            node.connect(sfxOutput());
-            out.connect(gain(PORTAL_REVERB)).connect(filter("lowpass", 2200, 0.7)).connect(portalReverb); // a darker hall
-
-            // Opening "vwouRRP": noise and a low buzz through swooping filters, into a fast phaser...
-            const [openIn, openOut] = phaser(t, t + 1.2, 3.5, 700, 600);
-            openOut.connect(out);
-            const rush = noise(), rushFilter = filter("lowpass", 400, 6), rushGain = gain(0);
-            ramp(rushFilter.frequency, t, 250, [2800, t + 0.18], [500, t + 0.8]);
-            ramp(rushGain.gain, t, 0.0001, [0.5, t + 0.06], [0.0001, t + 0.85]);
-            play(rush, t, t + 1, Math.random()).connect(rushFilter).connect(rushGain).connect(openIn);
-            const buzz = osc("sawtooth", 70), buzzFilter = filter("lowpass", 300, 8), buzzGain = gain(0);
-            ramp(buzz.frequency, t, 45, [95, t + 0.2], [60, t + 0.8]);
-            ramp(buzzFilter.frequency, t, 150, [1400, t + 0.15], [250, t + 0.75]);
-            ramp(buzzGain.gain, t, 0.0001, [0.35, t + 0.05], [0.0001, t + 0.8]);
-            play(buzz, t, t + 0.9).connect(buzzFilter).connect(buzzGain).connect(openIn);
-            // ...and the low "whomp"
-            const whomp = osc("sine", 120), whompGain = gain(0);
-            ramp(whomp.frequency, t, 120, [40, t + 0.45]);
-            ramp(whompGain.gain, t, 0.0001, [0.6, t + 0.03], [0.0001, t + 0.5]);
-            play(whomp, t, t + 0.6).connect(whompGain).connect(out);
-
-            // While open: a wobbling hum and bubbling noise through a slow phaser, with bubbles
-            const [loopIn, loopOut] = phaser(t, closed + 0.1, 0.8, 500, 350);
-            loopOut.connect(out);
-            const hum = osc("sawtooth", 55), humFilter = filter("lowpass", 260, 5), humGain = gain(0);
-            play(osc("sine", 4.5), t, closed + 0.1).connect(gain(120)).connect(humFilter.frequency);
-            ramp(humGain.gain, t + 0.2, 0.0001, [0.22, t + 0.6]);
-            humGain.gain.setValueAtTime(0.22, hold);
-            humGain.gain.exponentialRampToValueAtTime(0.0001, closed);
-            play(hum, t, closed + 0.1).connect(humFilter).connect(humGain).connect(loopIn);
-            const churn = noise(), churnFilter = filter("bandpass", 600, 5), churnGain = gain(0);
-            for (let at = t + 0.3; at < hold; at += rand(0.04, 0.08)) churnFilter.frequency.setTargetAtTime(rand(300, 1200), at, 0.015);
-            ramp(churnGain.gain, t + 0.3, 0.0001, [0.12, t + 0.6]);
-            churnGain.gain.setValueAtTime(0.12, hold);
-            churnGain.gain.exponentialRampToValueAtTime(0.0001, closed);
-            play(churn, t, closed + 0.1, Math.random()).connect(churnFilter).connect(churnGain).connect(loopIn);
-            for (let at = t + 0.4; at < hold; at += rand(0.06, 0.25)) {
-                // a bubble: a round tone whose pitch jumps up very fast ("blup")
-                const f = rand(250, 700), bubble = osc("sine", f), bubbleGain = gain(0);
-                ramp(bubble.frequency, at, f, [f * 2.2, at + 0.04]);
-                ramp(bubbleGain.gain, at, 0.0001, [0.06, at + 0.006], [0.0001, at + 0.06]);
-                play(bubble, at, at + 0.08).connect(bubbleGain).connect(out);
-            }
-
-            // Closing "fwoup": the noise sucked back down through a fast phaser...
-            const [closeIn, closeOut] = phaser(hold, closed + 0.3, 6, 900, 700);
-            closeOut.connect(out);
-            const suck = noise(), suckFilter = filter("lowpass", 300, 6), suckGain = gain(0);
-            ramp(suckFilter.frequency, hold, 2500, [220, closed]);
-            ramp(suckGain.gain, hold, 0.0001, [0.45, hold + 0.08], [0.0001, closed + 0.05]);
-            play(suck, hold, closed + 0.1, Math.random()).connect(suckFilter).connect(suckGain).connect(closeIn);
-            // ...ending in a wet pop
-            const pop = osc("sine", 180), popGain = gain(0);
-            ramp(pop.frequency, closed - 0.04, 180, [600, closed + 0.02], [150, closed + 0.1]);
-            ramp(popGain.gain, closed - 0.04, 0.0001, [0.35, closed], [0.0001, closed + 0.12]);
-            play(pop, closed - 0.04, closed + 0.15).connect(popGain).connect(out);
-        }
-
         /* =====================================================================
            SCREEN FLOW & INPUT — any press on the title screen: Space / Enter / click / tap
            ===================================================================== */
@@ -959,13 +842,21 @@
             if (crossingTime < 0) {
                 if ((crossingWait -= dt) > 0) return;
                 crossingTime = 0;
-                portalSound(PORTAL_LEFT_X, crossingTimeline().leftClose);
+                playSfx("portalOpen", MIX_PORTAL_OPEN, PORTAL_LEFT_X, 0, PORTAL_SOUND_LENGTH);
                 return;
             }
             const before = crossingTime;
             crossingTime += dt;
             const tl = crossingTimeline();
-            if (before < tl.rightOpen && crossingTime >= tl.rightOpen) portalSound(PORTAL_RIGHT_X, tl.arrive - tl.rightOpen);
+            // The portals' sounds (the left one opening is played as the crossing starts, above):
+            // started early so that each one's hit lands on its moment, panned to its portal
+            for (const [at, name, volume, x] of [
+                [tl.rightOpen, "portalOpen", MIX_PORTAL_OPEN, PORTAL_RIGHT_X],
+                [tl.leftClose + PORTAL_OPEN_T, "portalClose", MIX_PORTAL_CLOSE, PORTAL_LEFT_X],  // fully closed
+                [tl.end, "portalClose", MIX_PORTAL_CLOSE, PORTAL_RIGHT_X]]) {
+                const lead = soundLead(name);
+                if (before < at - lead && crossingTime >= at - lead) playSfx(name, volume, x, 0, PORTAL_SOUND_LENGTH);
+            }
             // The samurai's "hm"s, started early so they are heard as his eye opens, and as it
             // closes again (with the right portal: the end of the crossing)
             const hmLead = soundLead("samuraiHm");
