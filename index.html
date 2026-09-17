@@ -91,7 +91,7 @@
             display: none;
         }
 
-        /* The hand's slashes / the gauntlet's and geta's dust: the whole window, in big pixels (see SLASH_*, DUST_*) */
+        /* The hand's slashes / the gauntlet's dust: the whole window, in big pixels (see SLASH_*, DUST_*) */
         #slash {
             position: fixed;
             left: 0;
@@ -629,8 +629,8 @@
         const MIX_SFX = 1.0;               // SFX bus: the scene's sounds
         const MIX_TANCHO_JUMP = 0.25;      // the tancho breaking out of the water
         const MIX_TANCHO_SPLASH = 0.25;    // the tancho diving back in
-        const MIX_PORTAL_OPEN = 0.7;       // a portal opening
-        const MIX_PORTAL_CLOSE = 0.7;      // a portal closing
+        const MIX_PORTAL_OPEN = 0.5;       // a portal opening
+        const MIX_PORTAL_CLOSE = 0.5;      // a portal closing
         const MIX_GUMMY_STEP = 0.5;        // each of the gummy's footsteps
         const MIX_PRESS_START = 1.0;       // a press on PRESS START
         const MIX_SAMURAI_HM = 1.0;        // the samurai's "hm"s, as he opens his eye on the gummy and once he has closed it
@@ -832,8 +832,8 @@
            - "gauntlet": the hand as a golden gauntlet set with six stones; on a click it turns round to
              snap its fingers (cocked, snapped), the stones light up one after the other, a puff of dust
              blows away, and it turns back to pointing
-           - "geta": a wooden sandal seen from the side, its toe points; on a click it lifts, then
-             clacks down on its teeth, kicking up a little dust
+           - "geta": a wooden sandal seen from above, three-quarters, its toe pointing up-left; on a
+             click it lifts, then clacks down on its teeth
            ===================================================================== */
 
         const CURSOR_STYLE = "geta";       // "hand", "katana", "shuriken", "tomoe", "gauntlet" or "geta"
@@ -931,45 +931,31 @@
         const GAUNTLET_COCKED_T = 0.08;    // ...stays cocked this long, then snaps (dust, stones)...
         const GAUNTLET_SNAPPED_T = 0.25;   // ...stays snapped this long, then turns back to pointing
         const GAUNTLET_TURN_THIN = 0.15;   // how thin it gets, mid-turn (x its width)
-        // --- Geta --- (O outline; wood: K lit top, N, M in shade; its strap: R red, r in shade; W the clack's flicks)
-        // Its toe on the left; all its pictures the same size
-        const GETA_SPRITE = [
-            "................",
-            "................",
-            "....OOOO........",
-            "...ORRRRO.......",
-            "..ORrOOrRO......",
-            ".OORrO.OrROOOOO.",
-            "OKKKKKKKKKKKKKKO",
-            "ONNNNNNNNNNNNNNO",
-            "OMMMMMMMMMMMMMMO",
-            ".OOOMMOOOOMMOOO.",
-            "...OMMO..OMMO...",
-            "...OMMO..OMMO...",
-            "...OOOO..OOOO..."
-        ];
-        // Clacked down: the same, with a flick out from each side where its teeth hit
-        const GETA_CLACK = [
-            "................",
-            "................",
-            "....OOOO........",
-            "...ORRRRO.......",
-            "..ORrOOrRO......",
-            ".OORrO.OrROOOOO.",
-            "OKKKKKKKKKKKKKKO",
-            "ONNNNNNNNNNNNNNO",
-            "OMMMMMMMMMMMMMMO",
-            ".OOOMMOOOOMMOOO.",
-            "W..OMMO..OMMO..W",
-            ".W.OMMO..OMMO.W.",
-            "...OOOO..OOOO..."
-        ];
-        const GETA_COLORS = { O: "#14151c", K: "#d89a5a", N: "#a8692f", M: "#6b4020", R: "#d0303e", r: "#7a1420", W: "#ffffff" };
-        const GETA_TIP = { x: 0, y: 6 };   // the pointing spot: its toe, on the board's top (grid line, its pixels)
-        const GETA_FEET = { x: 8, y: 13 }; // where its teeth hit the ground, the dust's start (grid line)
+        // --- Geta --- built in code as a little 3D block, seen from above at an angle: its board (the
+        // top, then its thickness), two teeth under it, and a V strap on top from a knot near the toe.
+        // Along the board: u, from the toe (0) to the heel; across it: v (+ = the side facing us)
+        const GETA_LENGTH = 18;            // toe to heel (its pixels)
+        const GETA_WIDTH = 8;              // side to side
+        const GETA_CORNER = 1.2;           // how round its corners are
+        const GETA_ANGLE = 30;             // how much it slants down from the toe to the heel (degrees)
+        const GETA_BOARD = 1.4;            // the board's thickness
+        const GETA_TEETH = 3;              // how far the teeth come down under it
+        const GETA_TOOTH = 2.4;            // each tooth's thickness, along the board
+        const GETA_TEETH_AT = [0.27, 0.73]; // where they are along the board (0 = toe .. 1 = heel)
+        const GETA_DEPTH = [-0.3, 1];      // which way "down" goes on screen: how its sides show (per pixel down)
+        const GETA_KNOT = 3;               // the strap's knot, this far from the toe
+        const GETA_STRAP_TO = 0.62;        // the strap's two ends, this far along the board (0..1)...
+        const GETA_STRAP_IN = 0.4;         // ...and this far in from its sides
+        const GETA_STRAP_W = 0.75;         // the strap's half thickness
+        const GETA_KNOT_R = 1.1;           // the knot's radius
+        const GETA_TOE = { x: 4.5, y: 6 }; // the toe (the pointing spot) on the canvas (its pixels)
+        const GETA_COLORS = {
+            outline: "#14151c", top: "#d89a5a", lit: "#f2c07f", side: "#8a5226", tooth: "#5e381b",
+            strap: "#c8283a", knot: "#2a1a10", flick: "#ffffff"
+        };
         const GETA_LIFT = 2;               // on a click it lifts this high (its pixels)...
         const GETA_LIFT_T = 0.07;          // ...for this long (s)...
-        const GETA_CLACK_T = 0.12;         // ...then clacks down, its flicks showing this long
+        const GETA_CLACK_T = 0.12;         // ...then clacks down, a white flick out from each tooth this long
 
         // --- The gauntlet's snap: a puff of dust blown off from the fingertip ---
         // Each grain is one big pixel: it flies off, drifts with the wind and is gone at the end of its life
@@ -1042,7 +1028,7 @@
         const katanaTipR = KATANA_BLADE + 1 + KATANA_HOLD; // tip to the swing point (its pixels)
         // Canvas: odd, with a center pixel on the point it turns around, and room for the outline
         const CURSOR_SIZE = CURSOR_STYLE === "gauntlet" ? Math.max(GAUNTLET_SPRITE.length, GAUNTLET_SPRITE[0].length)
-            : CURSOR_STYLE === "geta" ? Math.max(GETA_SPRITE.length, GETA_SPRITE[0].length)
+            : CURSOR_STYLE === "geta" ? 27
             : CURSOR_STYLE === "hand" ? Math.max(HAND_SPRITE.length + HAND_PRESS, HAND_SPRITE[0].length) : 2 * (Math.ceil(CURSOR_STYLE === "katana"
             ? Math.max(katanaTipR, KATANA_GRIP - KATANA_HOLD + 1) : CURSOR_STYLE === "tomoe" ? TOMOE_RADIUS : SHURIKEN_RADIUS) + 2) + 1;
         cursorEl.width = cursorEl.height = CURSOR_SIZE;
@@ -1183,16 +1169,51 @@
             }
         }
 
-        // The geta: one of its pictures, `lift` pixels up
-        function drawGeta(sprite, lift) {
-            cursorCtx.clearRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
-            sprite.forEach((row, y) => {
-                for (let x = 0; x < row.length; x++) {
-                    if (row[x] === "." || y - lift < 0) continue;
-                    cursorCtx.fillStyle = GETA_COLORS[row[x]];
-                    cursorCtx.fillRect(x, y - lift, 1, 1);
-                }
+        // The geta, `lift` pixels up; `clack`: with its flicks. Each pixel is traced down from the top
+        // (along GETA_DEPTH): the first part of the geta it meets is what shows there
+        function drawGeta(lift, clack) {
+            const a = GETA_ANGLE * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+            const half = GETA_WIDTH / 2, bottom = GETA_BOARD + GETA_TEETH;
+            const inBoard = (u, v) => {
+                if (u < 0 || u > GETA_LENGTH || Math.abs(v) > half) return false;
+                const cu = Math.max(GETA_CORNER - u, u - (GETA_LENGTH - GETA_CORNER), 0), cv = Math.max(Math.abs(v) - (half - GETA_CORNER), 0);
+                return Math.hypot(cu, cv) <= GETA_CORNER;
+            };
+            // how far (u, v) is from the strap's arm from the knot to (eu, ev)
+            const knot = [GETA_KNOT, 0], ends = [-1, 1].map(side => [GETA_LENGTH * GETA_STRAP_TO, side * (half - GETA_STRAP_IN)]);
+            const onStrap = (u, v) => ends.some(([eu, ev]) => {
+                const du = eu - knot[0], dv = ev - knot[1], len = Math.hypot(du, dv);
+                const t = ((u - knot[0]) * du + (v - knot[1]) * dv) / (len * len);
+                return t >= 0 && t <= 1 && Math.abs((u - knot[0]) * dv - (v - knot[1]) * du) / len <= GETA_STRAP_W;
             });
+            // a point of the geta (u, v, depth) on the canvas
+            const toCanvas = (u, v, z) => [GETA_TOE.x + u * cos - v * sin + GETA_DEPTH[0] * z, GETA_TOE.y - lift + u * sin + v * cos + GETA_DEPTH[1] * z];
+            const px = new Array(CURSOR_SIZE * CURSOR_SIZE).fill(null);
+            for (let y = 0; y < CURSOR_SIZE; y++) for (let x = 0; x < CURSOR_SIZE; x++) {
+                let color = null;
+                for (let z = 0; z <= bottom && !color; z += 0.2) {
+                    const sx = x + 0.5 - GETA_TOE.x - GETA_DEPTH[0] * z, sy = y + 0.5 - (GETA_TOE.y - lift) - GETA_DEPTH[1] * z;
+                    const u = sx * cos + sy * sin, v = -sx * sin + sy * cos;
+                    if (z <= GETA_BOARD) {
+                        if (!inBoard(u, v)) continue;
+                        if (z > 0) color = "side";
+                        else if (Math.hypot(u - knot[0], v - knot[1]) <= GETA_KNOT_R) color = "knot";
+                        else if (onStrap(u, v)) color = "strap";
+                        else color = u < 1.2 || v < -half + 1.1 ? "lit" : "top"; // its toe and far edge catch the light
+                    } else if (Math.abs(v) <= half - 0.6 && GETA_TEETH_AT.some(f => Math.abs(u - f * GETA_LENGTH) <= GETA_TOOTH / 2)) color = "tooth";
+                }
+                px[y * CURSOR_SIZE + x] = color;
+            }
+            // the clack: a short flick out from the bottom of each tooth, on the side facing us
+            const flicks = [];
+            if (clack) GETA_TEETH_AT.forEach((f, i) => {
+                const out = i ? 1 : -1;
+                const [bx, by] = toCanvas(f * GETA_LENGTH + out * (GETA_TOOTH / 2 + 1.5), half, bottom);
+                flicks.push([Math.round(bx), Math.round(by)], [Math.round(bx + out), Math.round(by + 1)]);
+            });
+            paintCursor(px, GETA_COLORS);
+            cursorCtx.fillStyle = GETA_COLORS.flick;
+            for (const [fx, fy] of flicks) cursorCtx.fillRect(fx, fy, 1, 1);
         }
 
         // The hand, its finger bent down when pressed
@@ -1227,7 +1248,7 @@
             slashEl.style.height = slashEl.height * CURSOR_PIXEL + "px";
             slashShown = true; // redraw
         }
-        if (["hand", "gauntlet", "geta"].includes(CURSOR_STYLE)) { slashResize(); window.addEventListener("resize", slashResize); }
+        if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") { slashResize(); window.addEventListener("resize", slashResize); }
         else slashEl.remove();
 
         // A click: a cut through (x, y) (CSS px), at a random slant, either way, curving either way
@@ -1314,13 +1335,13 @@
         let stonesT = -1;          // s since the last click, while its stones light up (-1 = not)
         let dustAt = null;         // where the last click was {x, y} (CSS px), until it snaps
 
-        // A click at (x, y) (CSS px): a puff of dust off the fingertip; `both`: half of it blown to the left
-        function startDust(x, y, both) {
+        // A click at (x, y) (CSS px): a puff of dust off the fingertip
+        function startDust(x, y) {
             for (let i = 0; i < DUST_COUNT; i++) {
                 const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * DUST_SPREAD;
                 dust.push({
                     x: x / CURSOR_PIXEL + Math.cos(a) * r, y: y / CURSOR_PIXEL + Math.sin(a) * r,
-                    vx: randIn(DUST_SPEED_X) * (both && i % 2 ? -1 : 1), vy: randIn(DUST_SPEED_Y), t: 0, life: randIn(DUST_LIFE),
+                    vx: randIn(DUST_SPEED_X), vy: randIn(DUST_SPEED_Y), t: 0, life: randIn(DUST_LIFE),
                     color: DUST_COLORS[Math.floor(Math.random() * DUST_COLORS.length)]
                 });
             }
@@ -1346,7 +1367,7 @@
         function placeCursor(x, y) {
             let ox = 0, oy = 0;
             if (CURSOR_STYLE === "geta") {
-                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TIP.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TIP.y * CURSOR_PIXEL) + "px)";
+                cursorEl.style.transform = "translate(" + Math.round(x - GETA_TOE.x * CURSOR_PIXEL) + "px," + Math.round(y - GETA_TOE.y * CURSOR_PIXEL) + "px)";
                 return;
             }
             if (CURSOR_STYLE === "hand" || CURSOR_STYLE === "gauntlet") {
@@ -1373,7 +1394,7 @@
             if (e.pointerType === "touch") return;
             cursorClickT = 0;
             if (CURSOR_STYLE === "hand" && !blocked) { handDown = true; startSlash(e.clientX, e.clientY); }
-            if ((CURSOR_STYLE === "gauntlet" || CURSOR_STYLE === "geta") && !blocked) dustAt = { x: e.clientX, y: e.clientY };
+            if (CURSOR_STYLE === "gauntlet" && !blocked) dustAt = { x: e.clientX, y: e.clientY };
         }, true);
         window.addEventListener("pointerup", () => { handDown = false; }, true);
         window.addEventListener("blur", () => { handDown = false; });
@@ -1418,18 +1439,13 @@
                 draw = () => drawGauntlet(sprite, width, lit);
                 dustTick(dt);
             } else if (CURSOR_STYLE === "geta") {
-                // lifted, then clacked down (dust from under its teeth), then at rest
+                // lifted, then clacked down, then at rest
                 const t = cursorClickT;
-                if (dustAt && t >= GETA_LIFT_T) {
-                    startDust(dustAt.x + (GETA_FEET.x - GETA_TIP.x) * CURSOR_PIXEL, dustAt.y + (GETA_FEET.y - GETA_TIP.y) * CURSOR_PIXEL, true);
-                    dustAt = null;
-                }
                 if (t >= GETA_LIFT_T + GETA_CLACK_T) cursorClickT = -1;
                 const lift = cursorClickT >= 0 && t < GETA_LIFT_T ? GETA_LIFT : 0;
                 const clack = cursorClickT >= 0 && t >= GETA_LIFT_T;
                 key = "geta" + lift + clack;
-                draw = () => drawGeta(clack ? GETA_CLACK : GETA_SPRITE, lift);
-                dustTick(dt);
+                draw = () => drawGeta(lift, clack);
             } else if (CURSOR_STYLE === "katana") {
                 const end = KATANA_SWING[KATANA_SWING.length - 1][0];
                 const t = cursorClickT, windup = KATANA_SWING[1][0];
