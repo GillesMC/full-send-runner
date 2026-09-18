@@ -74,11 +74,10 @@
             pointer-events: none;
         }
 
-        /* THE MOUSE — a swimming koi (see KOI_* in the script). The system arrow is only
-           hidden once the script has it running. */
-        html.custom-cursor,
-        html.custom-cursor * {
-            cursor: none !important;
+        /* THE MOUSE — a swimming koi (see KOI_* in the script), on the game screen only: the
+           system arrow is hidden there (once the script has the koi running) and stays everywhere else */
+        html.custom-cursor #game {
+            cursor: none;
         }
 
         #cursor {
@@ -812,7 +811,7 @@
         }
 
         /* =====================================================================
-           THE MOUSE — a koi swimming, its tail swishing, in place of the arrow: the animation
+           THE MOUSE — a koi swimming, its tail swishing, in place of the arrow over the game screen: the animation
            of the koi.ani cursor (its 3 different 64px pictures, byte for byte, in assets/Koi_swim/),
            played in its order at its speed. Its head points.
            ===================================================================== */
@@ -846,10 +845,13 @@
             cursorEl.style.transform = "translate(" + Math.round(x - KOI_HOTSPOT.x * KOI_SCALE) + "px," + Math.round(y - KOI_HOTSPOT.y * KOI_SCALE) + "px)";
         }
 
+        // Only over the game screen: outside it (the black bands) the system arrow is back
         window.addEventListener("pointermove", (e) => {
             if (e.pointerType === "touch") return;
-            placeCursor(e.clientX, e.clientY);
-            cursorEl.style.display = "block";
+            const r = canvas.getBoundingClientRect();
+            const over = e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
+            if (over) placeCursor(e.clientX, e.clientY);
+            cursorEl.style.display = over ? "block" : "none";
         });
         document.documentElement.addEventListener("mouseleave", () => { cursorEl.style.display = "none"; });
 
